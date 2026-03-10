@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { SiteHeader } from "@/components/ui/site-header";
@@ -20,6 +20,11 @@ import {
   Eye,
   EyeOff,
   Loader2,
+  ArrowUpDown,
+  Calendar,
+  Lock,
+  Globe,
+  Link2,
 } from "lucide-react";
 
 type ReelItem = {
@@ -28,6 +33,15 @@ type ReelItem = {
   output_url: string | null;
   created_at: string;
   is_public: boolean;
+  match_id: string | null;
+};
+
+type ReelFilter = "all" | "public" | "private";
+type ReelSort = "newest" | "oldest";
+
+type MatchInfo = {
+  team_name: string;
+  opponent: string;
 };
 
 const VOLLEYBALL_POSITIONS = [
@@ -45,6 +59,7 @@ export default function ProfilePage() {
 
   const [loading, setLoading] = useState(true);
   const [savingProfile, setSavingProfile] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
   const [profileError, setProfileError] = useState<string>("");
   const [profileSuccess, setProfileSuccess] = useState(false);
 
@@ -72,9 +87,16 @@ export default function ProfilePage() {
   const [editPosition, setEditPosition] = useState<string>("");
 
   const [reelsCount, setReelsCount] = useState(0);
+  const [followerCount, setFollowerCount] = useState(0);
+  const [followingCount, setFollowingCount] = useState(0);
   const [reels, setReels] = useState<ReelItem[]>([]);
   const [selectedReel, setSelectedReel] = useState<ReelItem | null>(null);
   const [togglingReelId, setTogglingReelId] = useState<string | null>(null);
+  const [reelFilter, setReelFilter] = useState<ReelFilter>("all");
+  const [reelSort, setReelSort] = useState<ReelSort>("newest");
+  const [matchInfoMap, setMatchInfoMap] = useState<Record<string, MatchInfo>>(
+    {},
+  );
 
   const toggleReelPrivacy = async (
     reelId: string,
@@ -99,6 +121,30 @@ export default function ProfilePage() {
     }
   };
 
+  // Filtered & sorted reels
+  const filteredReels = useMemo(() => {
+    let result = [...reels];
+
+    // Filter
+    if (reelFilter === "public") result = result.filter((r) => r.is_public);
+    if (reelFilter === "private") result = result.filter((r) => !r.is_public);
+
+    // Sort
+    if (reelSort === "newest") {
+      result.sort(
+        (a, b) =>
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+      );
+    } else if (reelSort === "oldest") {
+      result.sort(
+        (a, b) =>
+          new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+      );
+    }
+
+    return result;
+  }, [reels, reelFilter, reelSort]);
+
   useEffect(() => {
     const load = async () => {
       const { data, error: sessionErr } = await supabase.auth.getSession();
@@ -114,6 +160,15 @@ export default function ProfilePage() {
 
       setUser(u);
       setAvatarUrl(u.user_metadata?.avatar_url ?? "");
+
+      // Sync avatar_url to profiles table for public profile pages
+      const currentAvatar = u.user_metadata?.avatar_url ?? "";
+      if (currentAvatar) {
+        await supabase
+          .from("profiles")
+          .update({ avatar_url: currentAvatar })
+          .eq("id", u.id);
+      }
 
       // Load profile
       const { data: profileData } = await supabase
@@ -135,7 +190,7 @@ export default function ProfilePage() {
       // Load completed reels
       const { data: reelData, count: reelCount } = await supabase
         .from("reel_jobs")
-        .select("id, title, output_url, created_at, is_public", {
+        .select("id, title, output_url, created_at, is_public, match_id", {
           count: "exact",
         })
         .eq("user_id", u.id)
@@ -144,6 +199,45 @@ export default function ProfilePage() {
 
       setReels(reelData ?? []);
       setReelsCount(reelCount ?? reelData?.length ?? 0);
+
+      // Load follower/following counts
+      const [{ count: followers }, { count: following }] = await Promise.all([
+        supabase
+          .from("follows")
+          .select("id", { count: "exact", head: true })
+          .eq("following_id", u.id),
+        supabase
+          .from("follows")
+          .select("id", { count: "exact", head: true })
+          .eq("follower_id", u.id),
+      ]);
+      setFollowerCount(followers ?? 0);
+      setFollowingCount(following ?? 0);
+
+      // Load match info for reels
+      const matchIds = [
+        ...new Set(
+          (reelData ?? [])
+            .map((r: ReelItem) => r.match_id)
+            .filter(Boolean) as string[],
+        ),
+      ];
+      if (matchIds.length > 0) {
+        const { data: matchData } = await supabase
+          .from("matches")
+          .select("id, team_name, opponent")
+          .in("id", matchIds);
+        if (matchData) {
+          const infoMap: Record<string, MatchInfo> = {};
+          for (const m of matchData) {
+            infoMap[m.id] = {
+              team_name: m.team_name || "",
+              opponent: m.opponent || "",
+            };
+          }
+          setMatchInfoMap(infoMap);
+        }
+      }
 
       setLoading(false);
     };
@@ -295,6 +389,35 @@ export default function ProfilePage() {
                 >
                   Edit profile
                 </Button>
+                <Button
+                  onClick={async () => {
+                    const url = `${window.location.origin}/profile/${profile.username}`;
+                    try {
+                      if (navigator.clipboard && window.isSecureContext) {
+                        await navigator.clipboard.writeText(url);
+                      } else {
+                        const textArea = document.createElement("textarea");
+                        textArea.value = url;
+                        textArea.style.position = "fixed";
+                        textArea.style.left = "-9999px";
+                        document.body.appendChild(textArea);
+                        textArea.focus();
+                        textArea.select();
+                        document.execCommand("copy");
+                        document.body.removeChild(textArea);
+                      }
+                      setLinkCopied(true);
+                      setTimeout(() => setLinkCopied(false), 2500);
+                    } catch {
+                      console.error("Failed to copy link");
+                    }
+                  }}
+                  variant="outline"
+                  className="h-8 px-3 text-sm font-semibold bg-gray-100 border-gray-200 text-gray-900 hover:bg-gray-200 rounded-lg"
+                >
+                  <Link2 className="w-4 h-4 mr-1.5" />
+                  {linkCopied ? "Copied!" : "Share profile"}
+                </Button>
                 <button
                   onClick={() => router.push("/settings")}
                   className="p-1 text-gray-700 hover:text-gray-900"
@@ -313,11 +436,15 @@ export default function ProfilePage() {
                   <span className="text-gray-600">reels</span>
                 </div>
                 <div className="flex items-center gap-1">
-                  <span className="font-semibold text-gray-900">0</span>
+                  <span className="font-semibold text-gray-900">
+                    {followerCount}
+                  </span>
                   <span className="text-gray-600">followers</span>
                 </div>
                 <div className="flex items-center gap-1">
-                  <span className="font-semibold text-gray-900">0</span>
+                  <span className="font-semibold text-gray-900">
+                    {followingCount}
+                  </span>
                   <span className="text-gray-600">following</span>
                 </div>
               </div>
@@ -357,6 +484,64 @@ export default function ProfilePage() {
           </div>
         </div>
 
+        {/* ─── Filter & Sort Controls ─── */}
+        {reels.length > 0 && (
+          <div className="max-w-4xl mx-auto px-6 mt-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              {/* Filter pills */}
+              <div className="flex items-center gap-2">
+                {(
+                  [
+                    { key: "all", label: "All", icon: Grid3X3 },
+                    { key: "public", label: "Public", icon: Globe },
+                    { key: "private", label: "Private", icon: Lock },
+                  ] as const
+                ).map(({ key, label, icon: Icon }) => (
+                  <button
+                    key={key}
+                    onClick={() => setReelFilter(key)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                      reelFilter === key
+                        ? "bg-[#0047AB] text-white"
+                        : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                    }`}
+                  >
+                    <Icon className="w-3 h-3" />
+                    {label}
+                    {key === "all" && (
+                      <span className="ml-0.5 text-[10px] opacity-75">
+                        ({reels.length})
+                      </span>
+                    )}
+                    {key === "public" && (
+                      <span className="ml-0.5 text-[10px] opacity-75">
+                        ({reels.filter((r) => r.is_public).length})
+                      </span>
+                    )}
+                    {key === "private" && (
+                      <span className="ml-0.5 text-[10px] opacity-75">
+                        ({reels.filter((r) => !r.is_public).length})
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+              {/* Sort dropdown */}
+              <div className="flex items-center gap-1.5">
+                <ArrowUpDown className="w-3.5 h-3.5 text-gray-500" />
+                <select
+                  value={reelSort}
+                  onChange={(e) => setReelSort(e.target.value as ReelSort)}
+                  className="text-xs font-medium text-gray-600 bg-transparent border border-gray-200 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#0047AB] focus:border-transparent cursor-pointer"
+                >
+                  <option value="newest">Newest first</option>
+                  <option value="oldest">Oldest first</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ─── Reels Grid ─── */}
         <div className="max-w-4xl mx-auto px-6 pb-12">
           {reels.length === 0 ? (
@@ -377,60 +562,109 @@ export default function ProfilePage() {
                 Upload a match
               </Button>
             </div>
+          ) : filteredReels.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <Film className="w-10 h-10 text-gray-300 mb-3" />
+              <p className="text-sm text-gray-500">
+                No {reelFilter} reels found.
+              </p>
+            </div>
           ) : (
-            <div className="grid grid-cols-3 gap-1 mt-1">
-              {reels.map((reel) => (
-                <div
-                  key={reel.id}
-                  className="aspect-square bg-gray-100 relative group cursor-pointer overflow-hidden"
-                  onClick={() => setSelectedReel(reel)}
-                >
-                  {reel.output_url ? (
-                    <video
-                      src={reel.output_url}
-                      className="w-full h-full object-cover"
-                      muted
-                      preload="metadata"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center">
-                      <Film className="w-8 h-8 text-gray-400" />
-                    </div>
-                  )}
-                  {/* Privacy toggle */}
-                  <button
-                    className="absolute top-2 left-2 z-10 p-1 rounded-full bg-black/40 hover:bg-black/60 transition-colors"
-                    title={
-                      reel.is_public
-                        ? "Public — click to make private"
-                        : "Private — click to make public"
-                    }
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      toggleReelPrivacy(reel.id, reel.is_public);
-                    }}
-                    disabled={togglingReelId === reel.id}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
+              {filteredReels.map((reel) => {
+                const matchInfo = reel.match_id
+                  ? matchInfoMap[reel.match_id]
+                  : null;
+                return (
+                  <div
+                    key={reel.id}
+                    className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow cursor-pointer group"
+                    onClick={() => setSelectedReel(reel)}
                   >
-                    {togglingReelId === reel.id ? (
-                      <Loader2 className="w-4 h-4 text-white animate-spin" />
-                    ) : reel.is_public ? (
-                      <Eye className="w-4 h-4 text-white" />
-                    ) : (
-                      <EyeOff className="w-4 h-4 text-white" />
-                    )}
-                  </button>
-                  {/* Play icon */}
-                  <div className="absolute top-2 right-2">
-                    <Play className="w-4 h-4 text-white drop-shadow-md fill-white" />
+                    {/* Thumbnail */}
+                    <div className="aspect-video bg-gray-100 relative overflow-hidden">
+                      {reel.output_url ? (
+                        <video
+                          src={reel.output_url}
+                          className="w-full h-full object-cover"
+                          muted
+                          preload="metadata"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <Film className="w-8 h-8 text-gray-400" />
+                        </div>
+                      )}
+                      {/* Play overlay */}
+                      <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                        <div className="w-12 h-12 rounded-full bg-white/90 flex items-center justify-center">
+                          <Play className="w-5 h-5 text-gray-900 fill-gray-900 ml-0.5" />
+                        </div>
+                      </div>
+                      {/* Privacy badge */}
+                      <div className="absolute top-2 left-2">
+                        <span
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold rounded-full ${
+                            reel.is_public
+                              ? "bg-green-100 text-green-700"
+                              : "bg-gray-100 text-gray-600"
+                          }`}
+                        >
+                          {reel.is_public ? (
+                            <Globe className="w-2.5 h-2.5" />
+                          ) : (
+                            <Lock className="w-2.5 h-2.5" />
+                          )}
+                          {reel.is_public ? "Public" : "Private"}
+                        </span>
+                      </div>
+                      {/* Privacy toggle */}
+                      <button
+                        className="absolute top-2 right-2 z-10 p-1.5 rounded-full bg-black/40 hover:bg-black/60 transition-colors"
+                        title={
+                          reel.is_public
+                            ? "Click to make private"
+                            : "Click to make public"
+                        }
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleReelPrivacy(reel.id, reel.is_public);
+                        }}
+                        disabled={togglingReelId === reel.id}
+                      >
+                        {togglingReelId === reel.id ? (
+                          <Loader2 className="w-3.5 h-3.5 text-white animate-spin" />
+                        ) : reel.is_public ? (
+                          <EyeOff className="w-3.5 h-3.5 text-white" />
+                        ) : (
+                          <Eye className="w-3.5 h-3.5 text-white" />
+                        )}
+                      </button>
+                    </div>
+
+                    {/* Card body */}
+                    <div className="px-3 py-2.5">
+                      <h4 className="text-sm font-semibold text-gray-900 truncate">
+                        {reel.title || "Highlight Reel"}
+                      </h4>
+                      {matchInfo && (
+                        <p className="text-xs text-gray-500 mt-0.5 truncate">
+                          🏐{" "}
+                          {matchInfo.team_name && matchInfo.opponent
+                            ? `${matchInfo.team_name} vs ${matchInfo.opponent}`
+                            : matchInfo.opponent || matchInfo.team_name}
+                        </p>
+                      )}
+                      <div className="flex items-center gap-3 mt-1.5 text-[11px] text-gray-400">
+                        <span className="flex items-center gap-1">
+                          <Calendar className="w-3 h-3" />
+                          {new Date(reel.created_at).toLocaleDateString()}
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                  {/* Hover overlay */}
-                  <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                    <span className="text-white text-sm font-medium px-2 text-center truncate">
-                      {reel.title || "Highlight Reel"}
-                    </span>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -471,9 +705,38 @@ export default function ProfilePage() {
               />
             )}
             <div className="px-4 py-3 bg-gray-900">
-              <p className="text-white text-sm font-medium">
-                {selectedReel?.title || "Highlight Reel"}
-              </p>
+              <div className="flex items-center justify-between">
+                <p className="text-white text-sm font-medium">
+                  {selectedReel?.title || "Highlight Reel"}
+                </p>
+                {selectedReel && (
+                  <span
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold rounded-full ${
+                      selectedReel.is_public
+                        ? "bg-green-500/20 text-green-400"
+                        : "bg-gray-500/20 text-gray-400"
+                    }`}
+                  >
+                    {selectedReel.is_public ? (
+                      <Globe className="w-2.5 h-2.5" />
+                    ) : (
+                      <Lock className="w-2.5 h-2.5" />
+                    )}
+                    {selectedReel.is_public ? "Public" : "Private"}
+                  </span>
+                )}
+              </div>
+              {selectedReel?.match_id &&
+                matchInfoMap[selectedReel.match_id] && (
+                  <p className="text-gray-400 text-xs mt-0.5">
+                    🏐{" "}
+                    {matchInfoMap[selectedReel.match_id].team_name &&
+                    matchInfoMap[selectedReel.match_id].opponent
+                      ? `${matchInfoMap[selectedReel.match_id].team_name} vs ${matchInfoMap[selectedReel.match_id].opponent}`
+                      : matchInfoMap[selectedReel.match_id].opponent ||
+                        matchInfoMap[selectedReel.match_id].team_name}
+                  </p>
+                )}
               {selectedReel?.created_at && (
                 <p className="text-gray-400 text-xs mt-0.5">
                   {new Date(selectedReel.created_at).toLocaleDateString()}
@@ -672,6 +935,18 @@ export default function ProfilePage() {
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
+
+      {/* Copy-link toast */}
+      {linkCopied && (
+        <div className="fixed bottom-6 right-6 z-50">
+          <div className="w-[320px] rounded-lg border shadow-lg p-4 flex items-center gap-3 bg-green-50 border-green-200">
+            <CheckCircle2 className="w-5 h-5 text-green-600 flex-shrink-0" />
+            <p className="text-sm font-medium text-green-800">
+              Profile link copied to clipboard!
+            </p>
+          </div>
+        </div>
+      )}
 
       <SiteFooter />
     </div>
