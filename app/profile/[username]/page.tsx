@@ -55,6 +55,27 @@ async function getPublicReels(userId: string): Promise<PublicReel[]> {
   return data ?? [];
 }
 
+async function getFollowCounts(
+  userId: string,
+): Promise<{ follower_count: number; following_count: number }> {
+  const supabase = getSupabase();
+  const [{ count: followerCount }, { count: followingCount }] =
+    await Promise.all([
+      supabase
+        .from("follows")
+        .select("id", { count: "exact", head: true })
+        .eq("following_id", userId),
+      supabase
+        .from("follows")
+        .select("id", { count: "exact", head: true })
+        .eq("follower_id", userId),
+    ]);
+  return {
+    follower_count: followerCount ?? 0,
+    following_count: followingCount ?? 0,
+  };
+}
+
 async function getMatchInfoMap(
   matchIds: string[],
 ): Promise<Record<string, { team_name: string; opponent: string }>> {
@@ -119,7 +140,10 @@ export default async function PublicProfilePage({
     notFound();
   }
 
-  const publicReels = await getPublicReels(profile.id);
+  const [publicReels, followCounts] = await Promise.all([
+    getPublicReels(profile.id),
+    getFollowCounts(profile.id),
+  ]);
   const matchIds = publicReels
     .map((r) => r.match_id)
     .filter((id): id is string => !!id);
@@ -169,11 +193,15 @@ export default async function PublicProfilePage({
                   </span>
                 </div>
                 <div className="flex items-center gap-1">
-                  <span className="font-semibold text-gray-900">0</span>
+                  <span className="font-semibold text-gray-900">
+                    {followCounts.follower_count}
+                  </span>
                   <span className="text-gray-600">followers</span>
                 </div>
                 <div className="flex items-center gap-1">
-                  <span className="font-semibold text-gray-900">0</span>
+                  <span className="font-semibold text-gray-900">
+                    {followCounts.following_count}
+                  </span>
                   <span className="text-gray-600">following</span>
                 </div>
               </div>

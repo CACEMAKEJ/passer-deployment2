@@ -87,6 +87,8 @@ export default function ProfilePage() {
   const [editPosition, setEditPosition] = useState<string>("");
 
   const [reelsCount, setReelsCount] = useState(0);
+  const [followerCount, setFollowerCount] = useState(0);
+  const [followingCount, setFollowingCount] = useState(0);
   const [reels, setReels] = useState<ReelItem[]>([]);
   const [selectedReel, setSelectedReel] = useState<ReelItem | null>(null);
   const [togglingReelId, setTogglingReelId] = useState<string | null>(null);
@@ -197,6 +199,20 @@ export default function ProfilePage() {
 
       setReels(reelData ?? []);
       setReelsCount(reelCount ?? reelData?.length ?? 0);
+
+      // Load follower/following counts
+      const [{ count: followers }, { count: following }] = await Promise.all([
+        supabase
+          .from("follows")
+          .select("id", { count: "exact", head: true })
+          .eq("following_id", u.id),
+        supabase
+          .from("follows")
+          .select("id", { count: "exact", head: true })
+          .eq("follower_id", u.id),
+      ]);
+      setFollowerCount(followers ?? 0);
+      setFollowingCount(following ?? 0);
 
       // Load match info for reels
       const matchIds = [
@@ -420,11 +436,15 @@ export default function ProfilePage() {
                   <span className="text-gray-600">reels</span>
                 </div>
                 <div className="flex items-center gap-1">
-                  <span className="font-semibold text-gray-900">0</span>
+                  <span className="font-semibold text-gray-900">
+                    {followerCount}
+                  </span>
                   <span className="text-gray-600">followers</span>
                 </div>
                 <div className="flex items-center gap-1">
-                  <span className="font-semibold text-gray-900">0</span>
+                  <span className="font-semibold text-gray-900">
+                    {followingCount}
+                  </span>
                   <span className="text-gray-600">following</span>
                 </div>
               </div>
