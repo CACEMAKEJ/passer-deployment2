@@ -6,6 +6,8 @@ import { supabase } from "@/lib/supabase";
 import { SiteHeader } from "@/components/ui/site-header";
 import { SiteFooter } from "@/components/ui/site-footer";
 import { Button } from "@/components/ui/button";
+import Image from "next/image";
+import Link from "next/link";
 import {
   Compass,
   Film,
@@ -17,6 +19,7 @@ import {
   ChevronDown,
   Volume2,
   VolumeX,
+  Search,
 } from "lucide-react";
 
 const PAGE_SIZE = 12;
@@ -34,6 +37,17 @@ type ExploreReel = {
   } | null;
 };
 
+type SearchResult = {
+  id: string;
+  username: string;
+  display_name: string;
+  avatar_url: string | null;
+  team: string | null;
+  position: string | null;
+  public_reels: number;
+  followers: number;
+};
+
 export default function ExplorePage() {
   const router = useRouter();
 
@@ -46,6 +60,13 @@ export default function ExplorePage() {
   // Feed state
   const [feedOpen, setFeedOpen] = useState(false);
   const [feedStartIndex, setFeedStartIndex] = useState(0);
+
+  // Search state
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [searchActive, setSearchActive] = useState(false);
+  const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchReels = useCallback(async (offset: number, append: boolean) => {
     const { data: reelData, error: reelErr } = await supabase
@@ -125,6 +146,40 @@ export default function ExplorePage() {
     setFeedOpen(true);
   };
 
+  const handleSearch = (value: string) => {
+    setSearchQuery(value);
+    if (searchTimeout.current) clearTimeout(searchTimeout.current);
+
+    if (value.trim().length < 2) {
+      setSearchResults([]);
+      setSearchActive(false);
+      setSearching(false);
+      return;
+    }
+
+    setSearchActive(true);
+    setSearching(true);
+    searchTimeout.current = setTimeout(async () => {
+      const res = await fetch(
+        `/api/users/search?q=${encodeURIComponent(value.trim())}`,
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setSearchResults(data.results ?? []);
+      } else {
+        setSearchResults([]);
+      }
+      setSearching(false);
+    }, 300);
+  };
+
+  const clearSearch = () => {
+    setSearchQuery("");
+    setSearchResults([]);
+    setSearchActive(false);
+    setSearching(false);
+  };
+
   // ── Loading state ──
   if (!authed || loading) {
     return (
@@ -167,6 +222,90 @@ export default function ExplorePage() {
                 Discover recent public highlight reels from the community.
               </p>
             </div>
+          </div>
+
+          {/* Search bar */}
+          <div className="mt-6 relative">
+            <div className="relative group">
+              <div className="absolute inset-0 bg-gradient-to-r from-[#0047AB]/20 to-[#0066FF]/20 rounded-2xl blur-sm group-focus-within:blur-md transition-all" />
+              <div className="relative flex items-center bg-white border border-gray-200 rounded-2xl shadow-sm group-focus-within:shadow-lg group-focus-within:border-[#0047AB]/30 transition-all">
+                <Search className="ml-4 w-5 h-5 text-gray-400 group-focus-within:text-[#0047AB] transition-colors flex-shrink-0" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => handleSearch(e.target.value)}
+                  placeholder="Search players by username or name..."
+                  className="w-full py-3.5 px-3 bg-transparent text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={clearSearch}
+                    className="mr-3 p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors flex-shrink-0"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Search results */}
+            {searchActive && (
+              <div className="mt-3">
+                {searching ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="w-5 h-5 text-gray-400 animate-spin" />
+                  </div>
+                ) : searchResults.length === 0 ? (
+                  <div className="text-center py-8">
+                    <User className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+                    <p className="text-sm text-gray-500">
+                      No players found for &ldquo;{searchQuery}&rdquo;
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {searchResults.map((user) => (
+                      <Link
+                        key={user.id}
+                        href={`/profile/${user.username}`}
+                        className="flex items-center gap-3 p-3 border border-gray-200 rounded-xl hover:shadow-md transition-shadow bg-white"
+                      >
+                        <div className="w-12 h-12 rounded-full overflow-hidden border border-gray-200 bg-gray-100 flex-shrink-0 flex items-center justify-center">
+                          {user.avatar_url ? (
+                            <Image
+                              src={user.avatar_url}
+                              alt={user.display_name || user.username}
+                              width={48}
+                              height={48}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <span className="text-gray-400 text-sm font-medium">
+                              {(user.display_name || user.username)
+                                .charAt(0)
+                                .toUpperCase()}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-gray-900 truncate">
+                            {user.username}
+                          </p>
+                          <p className="text-xs text-gray-500 truncate">
+                            {user.display_name}
+                            {user.team ? ` · ${user.team}` : ""}
+                          </p>
+                          <div className="flex items-center gap-3 mt-0.5 text-[11px] text-gray-400">
+                            <span>{user.public_reels} reels</span>
+                            <span>{user.followers} followers</span>
+                          </div>
+                        </div>
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
