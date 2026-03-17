@@ -3,9 +3,9 @@ import { Facebook, Twitter, Instagram } from "lucide-react";
 
 export function SiteFooter() {
   return (
-    <footer className="bg-white border-t border-gray-200 px-6 py-6">
-      <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
-        <div className="flex items-center gap-6 text-sm text-gray-600">
+    <footer className="bg-white border-t border-gray-200 px-4 md:px-6 lg:px-8 py-5 md:py-6">
+      <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4 md:gap-5">
+        <div className="flex items-center justify-center md:justify-start gap-4 md:gap-6 text-sm text-gray-600 flex-wrap">
           <Link href="/privacy" className="hover:text-gray-900">
             Privacy Policy
           </Link>

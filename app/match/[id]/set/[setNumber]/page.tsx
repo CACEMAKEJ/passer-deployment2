@@ -616,11 +616,11 @@ export default function MatchHighlightsPage() {
     <div className="min-h-screen flex flex-col">
       <SiteHeader showNav={true} activePage="dashboard" />
 
-      <main className="flex-1 bg-gray-50 px-6 py-8">
+      <main className="flex-1 bg-gray-50 px-4 md:px-6 lg:px-8 py-6 md:py-8">
         <div className="max-w-6xl mx-auto space-y-6">
           {/* Header */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-3 md:gap-4 flex-wrap">
               <Button
                 variant="outline"
                 onClick={() => router.push("/dashboard")}
@@ -642,9 +642,9 @@ export default function MatchHighlightsPage() {
           </div>
 
           {/* Layout: video left, highlights right */}
-          <div className="grid lg:grid-cols-5 gap-6 items-start">
+          <div className="grid md:grid-cols-5 gap-4 md:gap-6 items-start">
             {/* Video (2/3) */}
-            <div className="lg:col-span-3 space-y-4">
+            <div className="md:col-span-3 space-y-4">
               <VideoPlayer
                 ref={playerRef}
                 title="Match Replay"
@@ -660,8 +660,8 @@ export default function MatchHighlightsPage() {
             </div>
 
             {/* Highlights panel (1/3) */}
-            <div className="lg:col-span-2 lg:sticky lg:top-6">
-              <div className="bg-white border border-gray-200 rounded-lg overflow-hidden flex flex-col lg:h-[calc(100vh-10rem)]">
+            <div className="md:col-span-2 md:sticky md:top-6">
+              <div className="bg-white border border-gray-200 rounded-lg overflow-hidden flex flex-col md:h-[calc(100vh-10rem)]">
                 {/* Header */}
                 <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
                   <span className="text-sm font-medium text-gray-900">
@@ -721,7 +721,7 @@ export default function MatchHighlightsPage() {
                   </p>
                   {/* Selection controls */}
                   {sortedPoints.length > 0 && (
-                    <div className="mt-3 flex items-center justify-between">
+                    <div className="mt-3 flex items-center justify-between gap-3 flex-wrap">
                       <div className="flex gap-2">
                         <Button
                           variant="outline"

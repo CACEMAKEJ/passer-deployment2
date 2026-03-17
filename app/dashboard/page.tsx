@@ -169,11 +169,11 @@ export default function DashboardPage() {
       <SiteHeader showNav={true} activePage="dashboard" />
 
       {/* Main Content */}
-      <main className="flex-1 bg-gray-50 px-6 py-8">
-        <div className="max-w-7xl mx-auto space-y-8">
+      <main className="flex-1 bg-gray-50 px-4 md:px-6 lg:px-8 py-6 md:py-8">
+        <div className="max-w-7xl mx-auto space-y-6 md:space-y-8">
           {/* Search and Filter Section */}
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-            <div className="grid md:grid-cols-2 gap-6">
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 md:p-6">
+            <div className="grid md:grid-cols-2 gap-4 md:gap-6">
               {/* Search */}
               <div className="space-y-2">
                 <label className="text-sm font-medium text-gray-900">

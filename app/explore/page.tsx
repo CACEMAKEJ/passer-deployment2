@@ -214,7 +214,7 @@ export default function ExplorePage() {
 
       <main className="flex-1">
         {/* Page header */}
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-8 sm:pt-10 pb-4 sm:pb-6">
+        <div className="max-w-6xl mx-auto px-4 md:px-6 lg:px-8 pt-8 md:pt-10 pb-4 md:pb-6">
           <div className="flex items-center gap-3">
             <Compass className="w-7 h-7 text-[#0047AB]" />
             <div>
@@ -264,7 +264,7 @@ export default function ExplorePage() {
                     </p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                     {searchResults.map((user) => (
                       <Link
                         key={user.id}
@@ -310,7 +310,7 @@ export default function ExplorePage() {
           </div>
         </div>
 
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 pb-12">
+        <div className="max-w-6xl mx-auto px-4 md:px-6 lg:px-8 pb-12">
           {reels.length === 0 ? (
             /* ─── Empty state ─── */
             <div className="flex flex-col items-center justify-center py-24 text-center">
@@ -335,7 +335,7 @@ export default function ExplorePage() {
           ) : (
             <>
               {/* ─── Responsive grid ─── */}
-              <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 md:gap-4">
                 {reels.map((reel, idx) => (
                   <ReelCard
                     key={reel.id}

@@ -290,8 +290,8 @@ export default function UploadPage() {
     <div className="min-h-screen flex flex-col">
       <SiteHeader showNav={true} activePage="upload" />
 
-      <main className="flex-1 bg-gray-50 px-6 py-12">
-        <div className="max-w-4xl mx-auto space-y-8">
+      <main className="flex-1 bg-gray-50 px-4 md:px-6 lg:px-8 py-8 md:py-12">
+        <div className="max-w-4xl mx-auto space-y-6 md:space-y-8">
           {/* Status Messages */}
           {uploadStatus === "success" && (
             <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-center gap-3">
@@ -323,7 +323,7 @@ export default function UploadPage() {
 
           {/* Upload Area */}
           <div
-            className={`bg-white rounded-lg border-2 border-dashed p-16 transition-colors ${
+            className={`bg-white rounded-lg border-2 border-dashed p-8 md:p-12 lg:p-16 transition-colors ${
               isDragging ? "border-[#0047AB] bg-blue-50" : "border-gray-300"
             }`}
             onDragOver={handleDragOver}
@@ -437,9 +437,9 @@ export default function UploadPage() {
           {/* Match Details Form */}
           <form
             onSubmit={handleSubmit}
-            className="bg-white rounded-lg shadow-sm border border-gray-200 p-8"
+            className="bg-white rounded-lg shadow-sm border border-gray-200 p-5 md:p-8"
           >
-            <div className="grid md:grid-cols-2 gap-6">
+            <div className="grid md:grid-cols-2 gap-4 md:gap-6">
               {/* Team Name */}
               <div className="space-y-2">
                 <label className="text-sm font-medium text-gray-900">

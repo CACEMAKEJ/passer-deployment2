@@ -21,8 +21,8 @@ export function SiteHeader({ showNav = false, activePage }: SiteHeaderProps) {
   };
 
   return (
-    <header className="bg-[#0047AB] px-6 py-4">
-      <div className="max-w-7xl mx-auto flex items-center justify-between">
+    <header className="bg-[#0047AB] px-4 md:px-6 lg:px-8 py-3 md:py-4">
+      <div className="max-w-7xl mx-auto flex items-center justify-between gap-3 md:gap-4">
         {showNav ? (
           <Link href="/dashboard">
             <PasserLogo />
@@ -34,24 +34,24 @@ export function SiteHeader({ showNav = false, activePage }: SiteHeaderProps) {
         )}
 
         {showNav && (
-          <nav className="flex items-center gap-8">
+          <nav className="flex items-center justify-end gap-2 md:gap-3 lg:gap-7 flex-wrap">
             <Link
               href="/dashboard"
-              className={
+              className={`text-sm md:text-[15px] ${
                 activePage === "dashboard"
                   ? "text-[#F5A623] font-medium"
                   : "text-white hover:text-gray-200"
-              }
+              }`}
             >
               Dashboard
             </Link>
             <Link
               href="/explore"
-              className={
+              className={`text-sm md:text-[15px] ${
                 activePage === "explore"
                   ? "text-[#F5A623] font-medium"
                   : "text-white hover:text-gray-200"
-              }
+              }`}
             >
               <span className="flex items-center gap-1.5">
                 <Compass className="w-4 h-4" />
@@ -60,27 +60,27 @@ export function SiteHeader({ showNav = false, activePage }: SiteHeaderProps) {
             </Link>
             <Link
               href="/upload-page"
-              className={
+              className={`text-sm md:text-[15px] ${
                 activePage === "upload"
                   ? "text-[#F5A623] font-medium"
                   : "text-white hover:text-gray-200"
-              }
+              }`}
             >
               Upload Video
             </Link>
             <Link
               href="/profile"
-              className={
+              className={`text-sm md:text-[15px] ${
                 activePage === "profile"
                   ? "text-[#F5A623] font-medium"
                   : "text-white hover:text-gray-200"
-              }
+              }`}
             >
               Profile
             </Link>
             <Button
               variant="outline"
-              className="bg-transparent border-[#F5A623] text-[#F5A623] hover:bg-[#F5A623]/10"
+              className="h-9 px-3 md:px-4 bg-transparent border-[#F5A623] text-[#F5A623] hover:bg-[#F5A623]/10"
               onClick={handleLogout}
             >
               <LogOut className="w-4 h-4 mr-2" />
