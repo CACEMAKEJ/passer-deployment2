@@ -292,11 +292,11 @@ export default function UploadPage() {
     <div className="min-h-screen flex flex-col">
       <SiteHeader showNav={true} activePage="upload" />
 
-      <main className="flex-1 bg-gray-50 px-4 md:px-6 lg:px-8 py-8 md:py-12">
+      <main className="page-shell flex-1 px-4 md:px-6 lg:px-8 py-8 md:py-12">
         <div className="max-w-4xl mx-auto space-y-6 md:space-y-8">
           {/* Status Messages */}
           {uploadStatus === "success" && (
-            <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-center gap-3">
+            <div className="bg-green-50/90 border border-green-200 rounded-2xl p-4 flex items-center gap-3 shadow-sm">
               <CheckCircle2 className="w-5 h-5 text-green-600 flex-shrink-0" />
               <p className="text-green-800">
                 Video uploaded successfully! Your match analysis will be ready
@@ -306,7 +306,7 @@ export default function UploadPage() {
           )}
 
           {uploadStatus === "error" && errorMessage && (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+            <div className="bg-red-50/90 border border-red-200 rounded-2xl p-4 shadow-sm">
               <div className="flex items-start gap-3">
                 <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
                 <div className="flex-1">
@@ -328,8 +328,10 @@ export default function UploadPage() {
             initial={prefersReducedMotion ? false : { opacity: 0, y: 20 }}
             animate={prefersReducedMotion ? undefined : { opacity: 1, y: 0 }}
             transition={prefersReducedMotion ? undefined : { duration: 0.32 }}
-            className={`bg-white rounded-lg border-2 border-dashed p-8 md:p-12 lg:p-16 transition-colors ${
-              isDragging ? "border-[#0047AB] bg-blue-50" : "border-gray-300"
+            className={`rounded-3xl border-2 border-dashed p-8 md:p-12 lg:p-16 transition-colors shadow-[0_24px_44px_-34px_rgba(0,71,171,0.95)] backdrop-blur-lg ${
+              isDragging
+                ? "border-[#0047AB] bg-[#dfeeff]/90"
+                : "border-[#99bbe4] bg-white/72"
             }`}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
@@ -381,7 +383,7 @@ export default function UploadPage() {
                   onClick={() =>
                     document.getElementById("file-upload")?.click()
                   }
-                  className="bg-[#0047AB] hover:bg-[#003580] text-white px-8 h-11"
+                  className="px-8 h-11"
                   disabled={isUploading}
                 >
                   {selectedFile ? "Change Video" : "Click to upload"}
@@ -390,7 +392,7 @@ export default function UploadPage() {
                   <Button
                     onClick={handleClearFile}
                     variant="outline"
-                    className="border-gray-300 text-gray-700 hover:bg-gray-100 px-6 h-11"
+                    className="border-[#94b6de] text-[#18467f] hover:bg-[#e8f2ff] px-6 h-11"
                   >
                     <X className="w-4 h-4 mr-2" />
                     Clear
@@ -411,7 +413,7 @@ export default function UploadPage() {
               initial={prefersReducedMotion ? false : { opacity: 0, y: 16 }}
               animate={prefersReducedMotion ? undefined : { opacity: 1, y: 0 }}
               transition={prefersReducedMotion ? undefined : { duration: 0.24 }}
-              className="bg-white rounded-lg shadow-sm border border-gray-200 p-6"
+              className="glass-surface p-6"
             >
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
@@ -424,7 +426,7 @@ export default function UploadPage() {
                 </div>
                 <div className="w-full bg-gray-200 rounded-full h-3">
                   <motion.div
-                    className="bg-[#0047AB] h-3 rounded-full transition-all duration-300"
+                    className="bg-[linear-gradient(120deg,#0047AB,#1B7CFF,#E8A550)] h-3 rounded-full transition-all duration-300"
                     initial={prefersReducedMotion ? false : { width: 0 }}
                     animate={{ width: `${uploadProgress}%` }}
                     transition={
@@ -453,7 +455,7 @@ export default function UploadPage() {
           {/* Match Details Form */}
           <motion.form
             onSubmit={handleSubmit}
-            className="bg-white rounded-lg shadow-sm border border-gray-200 p-5 md:p-8"
+            className="glass-surface p-5 md:p-8"
             initial={prefersReducedMotion ? false : { opacity: 0, y: 20 }}
             animate={prefersReducedMotion ? undefined : { opacity: 1, y: 0 }}
             transition={

@@ -188,7 +188,7 @@ export default function ExplorePage() {
     return (
       <div className="min-h-screen flex flex-col">
         <SiteHeader showNav={true} activePage="explore" />
-        <main className="flex-1 bg-white flex items-center justify-center">
+        <main className="page-shell flex-1 flex items-center justify-center">
           <Loader2 className="w-6 h-6 text-gray-400 animate-spin" />
         </main>
         <SiteFooter />
@@ -211,7 +211,7 @@ export default function ExplorePage() {
 
   // ── Grid browse view ──
   return (
-    <div className="min-h-screen flex flex-col bg-white">
+    <div className="min-h-screen flex flex-col page-shell">
       <SiteHeader showNav={true} activePage="explore" />
 
       <main className="flex-1">
@@ -225,8 +225,8 @@ export default function ExplorePage() {
           <div className="flex items-center gap-3">
             <Compass className="w-7 h-7 text-[#0047AB]" />
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">Explore</h1>
-              <p className="text-sm text-gray-600 mt-0.5">
+              <h1 className="text-2xl font-bold text-[#123f77]">Explore</h1>
+              <p className="text-sm text-[#3d608d] mt-0.5">
                 Discover recent public highlight reels from the community.
               </p>
             </div>
@@ -235,15 +235,15 @@ export default function ExplorePage() {
           {/* Search bar */}
           <div className="mt-6 relative">
             <div className="relative group">
-              <div className="absolute inset-0 bg-gradient-to-r from-[#0047AB]/20 to-[#0066FF]/20 rounded-2xl blur-sm group-focus-within:blur-md transition-all" />
-              <div className="relative flex items-center bg-white border border-gray-200 rounded-2xl shadow-sm group-focus-within:shadow-lg group-focus-within:border-[#0047AB]/30 transition-all">
-                <Search className="ml-4 w-5 h-5 text-gray-400 group-focus-within:text-[#0047AB] transition-colors flex-shrink-0" />
+              <div className="absolute inset-0 bg-gradient-to-r from-[#0047AB]/20 via-[#1B7CFF]/20 to-[#E8A550]/20 rounded-2xl blur-sm group-focus-within:blur-md transition-all" />
+              <div className="relative flex items-center bg-white/80 border border-white/70 backdrop-blur-lg rounded-2xl shadow-[0_18px_35px_-24px_rgba(0,71,171,0.95)] group-focus-within:shadow-[0_22px_38px_-20px_rgba(0,71,171,0.95)] group-focus-within:border-[#0047AB]/30 transition-all">
+                <Search className="ml-4 w-5 h-5 text-[#4a6e97] group-focus-within:text-[#0047AB] transition-colors flex-shrink-0" />
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(e) => handleSearch(e.target.value)}
                   placeholder="Search players by username or name..."
-                  className="w-full py-3.5 px-3 bg-transparent text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none"
+                  className="w-full py-3.5 px-3 bg-transparent text-sm text-[#183f71] placeholder:text-[#6a86a8] focus:outline-none"
                 />
                 {searchQuery && (
                   <button
@@ -297,7 +297,7 @@ export default function ExplorePage() {
                       >
                         <Link
                           href={`/profile/${user.username}`}
-                          className="flex items-center gap-3 p-3 border border-gray-200 rounded-xl hover:shadow-md transition-shadow bg-white"
+                          className="flex items-center gap-3 p-3 border border-white/75 rounded-xl hover:shadow-md transition-shadow bg-white/76 backdrop-blur-md"
                         >
                           <div className="w-12 h-12 rounded-full overflow-hidden border border-gray-200 bg-gray-100 flex-shrink-0 flex items-center justify-center">
                             {user.avatar_url ? (
@@ -354,10 +354,7 @@ export default function ExplorePage() {
                 appear here. Be the first — set a reel to public from your
                 profile!
               </p>
-              <Button
-                onClick={() => router.push("/profile")}
-                className="mt-6 bg-[#0047AB] hover:bg-[#003580] text-white"
-              >
+              <Button onClick={() => router.push("/profile")} className="mt-6">
                 Go to your profile
               </Button>
             </div>
@@ -381,7 +378,7 @@ export default function ExplorePage() {
                     onClick={loadMore}
                     disabled={loadingMore}
                     variant="outline"
-                    className="border-gray-300 text-gray-700 hover:bg-gray-100 px-8"
+                    className="border-[#8cb2e0] text-[#18467f] hover:bg-[#e8f2ff] px-8"
                   >
                     {loadingMore ? (
                       <>
@@ -422,7 +419,7 @@ function ReelCard({
   return (
     <motion.button
       onClick={onClick}
-      className="group relative rounded-xl overflow-hidden border border-gray-200 bg-white hover:shadow-md transition-shadow text-left w-full"
+      className="group relative rounded-2xl overflow-hidden border border-white/75 bg-white/75 backdrop-blur-lg hover:shadow-[0_20px_38px_-24px_rgba(0,71,171,0.95)] transition-shadow text-left w-full"
       initial={prefersReducedMotion ? false : { opacity: 0, y: 18 }}
       animate={prefersReducedMotion ? undefined : { opacity: 1, y: 0 }}
       transition={
@@ -434,7 +431,7 @@ function ReelCard({
       whileTap={prefersReducedMotion ? undefined : { scale: 0.99 }}
     >
       {/* Thumbnail — 9:16 aspect on mobile, 9:16 everywhere for TikTok feel */}
-      <div className="aspect-[9/16] bg-gray-100 relative overflow-hidden">
+      <div className="aspect-[9/16] bg-[#dce7f6] relative overflow-hidden">
         {reel.output_url ? (
           <video
             src={reel.output_url}
