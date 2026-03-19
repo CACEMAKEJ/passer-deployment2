@@ -9,7 +9,12 @@ import { SiteFooter } from "@/components/ui/site-footer";
 import { Button } from "@/components/ui/button";
 import { HighlightReelPanel } from "@/components/highlight-reel-panel";
 import { ActionLegend } from "@/components/action-legend";
-import { VideoPlayer, type VideoPlayerHandle } from "@/components/video-player";
+import {
+  VideoPlayer,
+  type VideoPlayerHandle,
+  type VideoTimelineMarker,
+  type VideoTimelineMarkerAdjust,
+} from "@/components/video-player";
 import { PointTimeline } from "@/components/point-timeline";
 import { getSetData, type Point, actionTypeColors } from "@/lib/match-data";
 
@@ -54,6 +59,16 @@ const ACTIONS: HighlightAction[] = [
 ];
 
 const MARK_OFFSET_SECONDS = 5;
+
+const ACTION_TIMELINE_COLORS: Record<HighlightAction, string> = {
+  spike: "#EF4444",
+  set: "#06B6D4",
+  block: "#3B82F6",
+  pass: "#22C55E",
+  ace: "#F59E0B",
+  save: "#8B5CF6",
+  other: "#9CA3AF",
+};
 
 function formatTime(s: number) {
   const m = Math.floor(s / 60);
@@ -113,6 +128,7 @@ export default function MatchHighlightsPage() {
   // Clip-bounded playback: which point is actively playing + current video time
   const [activeClipId, setActiveClipId] = useState<string | null>(null);
   const [currentVideoTime, setCurrentVideoTime] = useState(0);
+  const [videoDuration, setVideoDuration] = useState(0);
   // We need a ref for the active clip so the timeupdate callback can read it without stale closures
   const activeClipRef = useRef<{ id: string; start: number; end: number } | null>(null);
 
@@ -185,11 +201,38 @@ export default function MatchHighlightsPage() {
     [points],
   );
 
+  const timelineMarkers = useMemo<VideoTimelineMarker[]>(() => {
+    const toPercent = (seconds: number) => {
+      if (videoDuration <= 0) return 0;
+      return Math.max(0, Math.min(100, (seconds / videoDuration) * 100));
+    };
+
+    return sortedPoints.map((p) => {
+      const before = p.clipBefore ?? MARK_OFFSET_SECONDS;
+      const after = p.clipAfter ?? MARK_OFFSET_SECONDS;
+      const clipStart = Math.max(0, p.timestamp - before);
+      const clipEnd = p.timestamp + after;
+
+      return {
+        id: p.id,
+        timestamp: p.timestamp,
+        clipStart,
+        clipEnd,
+        label: p.action.toUpperCase(),
+        color: ACTION_TIMELINE_COLORS[p.action],
+        startPercent: toPercent(clipStart),
+        endPercent: toPercent(clipEnd),
+        pointPercent: toPercent(p.timestamp),
+      };
+    });
+  }, [sortedPoints, videoDuration]);
+
   useEffect(() => {
     const load = async () => {
       try {
         setIsLoading(true);
         setPageError(null);
+        setVideoDuration(0);
 
         // Handle demo matches differently
         if (isDemoMatch) {
@@ -334,10 +377,42 @@ export default function MatchHighlightsPage() {
   };
 
   // Update clip offsets for a point locally (mark dirty; no DB write yet)
-  const updatePointOffset = (id: string, updates: { clipBefore?: number; clipAfter?: number }) => {
-    setPoints((prev) => prev.map((p) => (p.id === id ? { ...p, ...updates } : p)));
-    setDirtyOffsetIds((prev) => new Set(prev).add(id));
-  };
+  const updatePointOffset = useCallback(
+    (id: string, updates: { clipBefore?: number; clipAfter?: number }) => {
+      setPoints((prev) => {
+        const next = prev.map((p) => (p.id === id ? { ...p, ...updates } : p));
+
+        // If this point is currently active, keep the clip boundaries in sync while editing.
+        const active = next.find((p) => p.id === id);
+        if (active && activeClipRef.current?.id === id) {
+          const before = active.clipBefore ?? MARK_OFFSET_SECONDS;
+          const after = active.clipAfter ?? MARK_OFFSET_SECONDS;
+          activeClipRef.current = {
+            id,
+            start: Math.max(0, active.timestamp - before),
+            end: active.timestamp + after,
+          };
+        }
+
+        return next;
+      });
+
+      setDirtyOffsetIds((prev) => {
+        const next = new Set(prev);
+        next.add(id);
+        return next;
+      });
+    },
+    [],
+  );
+
+  const handleMarkerAdjust = useCallback(
+    (markerId: string, updates: VideoTimelineMarkerAdjust) => {
+      updatePointOffset(markerId, updates);
+      setSelectedPointId(markerId);
+    },
+    [updatePointOffset],
+  );
 
   // Bulk-save all dirty offsets to DB
   const applyOffsets = async () => {
@@ -394,6 +469,12 @@ export default function MatchHighlightsPage() {
     playerRef.current?.play();
   };
 
+  const handleMarkerClick = (markerId: string) => {
+    const point = sortedPoints.find((p) => p.id === markerId);
+    if (!point) return;
+    handleSeek(point);
+  };
+
   const handleDelete = async (id: string) => {
     try {
       const { error } = await supabase
@@ -404,6 +485,10 @@ export default function MatchHighlightsPage() {
 
       setPoints((prev) => prev.filter((p) => p.id !== id));
       if (selectedPointId === id) setSelectedPointId(null);
+      if (activeClipId === id) {
+        activeClipRef.current = null;
+        setActiveClipId(null);
+      }
       if (lastInsertedIdRef.current === id) {
         lastInsertedIdRef.current = null;
         setCanUndo(false);
@@ -428,7 +513,7 @@ export default function MatchHighlightsPage() {
       <div className="min-h-screen flex flex-col">
         <SiteHeader showNav={true} activePage="dashboard" />
         <main className="flex-1 bg-gray-50 px-6 py-8">
-          <div className="max-w-6xl mx-auto space-y-6 animate-pulse">
+          <div className="max-w-[1500px] mx-auto space-y-6 animate-pulse">
             <div className="h-8 bg-gray-200 rounded w-1/3" />
             <div className="grid lg:grid-cols-3 gap-6">
               <div className="lg:col-span-2 h-96 bg-gray-200 rounded" />
@@ -481,7 +566,7 @@ export default function MatchHighlightsPage() {
         <SiteHeader showNav={true} activePage="dashboard" />
 
         <main className="flex-1 bg-gray-50 px-6 py-8">
-          <div className="max-w-6xl mx-auto space-y-6">
+          <div className="max-w-[1500px] mx-auto space-y-6">
             {/* Header */}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
@@ -587,7 +672,7 @@ export default function MatchHighlightsPage() {
       <SiteHeader showNav={true} activePage="dashboard" />
 
       <main className="flex-1 bg-gray-50 px-6 py-8">
-        <div className="max-w-6xl mx-auto space-y-6">
+        <div className="max-w-[1500px] mx-auto space-y-6">
           {/* Header */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
@@ -612,14 +697,25 @@ export default function MatchHighlightsPage() {
           </div>
 
           {/* Layout: video left, highlights right */}
-          <div className="grid lg:grid-cols-5 gap-6 items-start">
+          <div className="grid lg:grid-cols-6 gap-6 items-start">
             {/* Video (2/3) */}
-            <div className="lg:col-span-3 space-y-4">
+            <div className="lg:col-span-4 space-y-4">
               <VideoPlayer
                 ref={playerRef}
                 title="Match Replay"
                 src={match.videoUrl}
                 onTimeUpdate={handleVideoTimeUpdate}
+                onDurationChange={setVideoDuration}
+                markers={timelineMarkers}
+                activeMarkerId={activeClipId}
+                currentTime={currentVideoTime}
+                onMarkerClick={handleMarkerClick}
+                onMarkerAdjust={handleMarkerAdjust}
+                onMarkPoint={() => {
+                  void markHighlight();
+                }}
+                markDisabled={isMarking}
+                isMarking={isMarking}
               />
               <div className="mt-4">
                 <HighlightReelPanel matchId={matchId} />
