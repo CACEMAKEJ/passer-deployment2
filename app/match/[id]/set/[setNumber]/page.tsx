@@ -64,6 +64,10 @@ function formatTime(s: number) {
   return `${m}:${sec.toString().padStart(2, "0")}`;
 }
 
+function getActionColor(action: HighlightAction) {
+  return (actionTypeColors as Record<string, string>)[action] ?? "#6B7280";
+}
+
 export default function MatchHighlightsPage() {
   const params = useParams();
   const router = useRouter();
@@ -104,6 +108,7 @@ export default function MatchHighlightsPage() {
   // Clip-bounded playback: which point is actively playing + current video time
   const [activeClipId, setActiveClipId] = useState<string | null>(null);
   const [currentVideoTime, setCurrentVideoTime] = useState(0);
+  const [videoDuration, setVideoDuration] = useState(0);
   // We need a ref for the active clip so the timeupdate callback can read it without stale closures
   const activeClipRef = useRef<{
     id: string;
@@ -181,6 +186,33 @@ export default function MatchHighlightsPage() {
     () => [...points].sort((a, b) => a.timestamp - b.timestamp),
     [points],
   );
+
+  const timelineMarkers = useMemo(() => {
+    const safeDuration = videoDuration > 0 ? videoDuration : 1;
+
+    return sortedPoints.map((p, i) => {
+      const before = p.clipBefore ?? MARK_OFFSET_SECONDS;
+      const after = p.clipAfter ?? MARK_OFFSET_SECONDS;
+
+      const clipStart = Math.max(0, p.timestamp - before);
+      const rawClipEnd = Math.max(clipStart, p.timestamp + after);
+      const clipEnd =
+        videoDuration > 0 ? Math.min(videoDuration, rawClipEnd) : rawClipEnd;
+      const markerPoint = Math.min(Math.max(p.timestamp, clipStart), clipEnd);
+
+      return {
+        id: p.id,
+        timestamp: p.timestamp,
+        clipStart,
+        clipEnd,
+        label: `${p.action.toUpperCase()} #${i + 1}`,
+        color: getActionColor(p.action),
+        startPercent: (clipStart / safeDuration) * 100,
+        endPercent: (clipEnd / safeDuration) * 100,
+        pointPercent: (markerPoint / safeDuration) * 100,
+      };
+    });
+  }, [sortedPoints, videoDuration]);
 
   useEffect(() => {
     const load = async () => {
@@ -368,12 +400,29 @@ export default function MatchHighlightsPage() {
     const before = p.clipBefore ?? MARK_OFFSET_SECONDS;
     const after = p.clipAfter ?? MARK_OFFSET_SECONDS;
     const start = Math.max(0, p.timestamp - before);
-    const end = p.timestamp + after;
+    const end =
+      videoDuration > 0
+        ? Math.min(videoDuration, p.timestamp + after)
+        : p.timestamp + after;
     // Set the active clip boundary
     activeClipRef.current = { id: p.id, start, end };
     setActiveClipId(p.id);
+    setCurrentVideoTime(start);
     playerRef.current?.seekTo(start);
     playerRef.current?.play();
+  };
+
+  const handleMarkerClick = (markerId: string) => {
+    const point = points.find((p) => p.id === markerId);
+    if (!point) return;
+    handleSeek(point);
+  };
+
+  const handleMarkerAdjust = (
+    markerId: string,
+    updates: { clipBefore?: number; clipAfter?: number },
+  ) => {
+    updatePointOffset(markerId, updates);
   };
 
   const handleDelete = async (id: string) => {
@@ -499,6 +548,17 @@ export default function MatchHighlightsPage() {
                 title="Match Replay"
                 src={match.videoUrl}
                 onTimeUpdate={handleVideoTimeUpdate}
+                currentTime={currentVideoTime}
+                onDurationChange={setVideoDuration}
+                markers={timelineMarkers}
+                activeMarkerId={activeClipId ?? selectedPointId}
+                onMarkerClick={handleMarkerClick}
+                onMarkerAdjust={handleMarkerAdjust}
+                onMarkPoint={() => {
+                  void markHighlight();
+                }}
+                markDisabled={isMarking}
+                isMarking={isMarking}
               />
               <div className="mt-4">
                 <HighlightReelPanel
