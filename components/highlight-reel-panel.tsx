@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
-import { Trash2, Loader2, Eye, EyeOff, Globe } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { getReelTitle } from "@/lib/match-title";
+import { Trash2, Loader2, Eye, EyeOff, Globe, Pencil } from "lucide-react";
 
 type ReelJobStatus = "queued" | "processing" | "complete" | "failed";
 
@@ -21,6 +23,12 @@ type ReelJobRow = {
   title?: string | null;
   is_public: boolean;
   show_on_explore: boolean;
+};
+
+type ReelRenameFeedback = {
+  reelId: string;
+  kind: "success" | "error";
+  message: string;
 };
 
 function formatDate(iso: string) {
@@ -41,6 +49,12 @@ export function HighlightReelPanel({
   const [isStarting, setIsStarting] = useState(false);
   const [isDeletingId, setIsDeletingId] = useState<string | null>(null);
   const [isTogglingId, setIsTogglingId] = useState<string | null>(null);
+  const [editingReelId, setEditingReelId] = useState<string | null>(null);
+  const [reelTitleDraft, setReelTitleDraft] = useState("");
+  const [renamingReelId, setRenamingReelId] = useState<string | null>(null);
+  const [renameFeedback, setRenameFeedback] =
+    useState<ReelRenameFeedback | null>(null);
+  const skipBlurSaveForReelIdRef = useRef<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const selected = useMemo(
@@ -76,6 +90,12 @@ export function HighlightReelPanel({
     loadReels();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [matchId]);
+
+  useEffect(() => {
+    if (!renameFeedback) return;
+    const timeoutId = window.setTimeout(() => setRenameFeedback(null), 3000);
+    return () => window.clearTimeout(timeoutId);
+  }, [renameFeedback]);
 
   // Poll any queued/processing reels
   useEffect(() => {
@@ -147,6 +167,65 @@ export function HighlightReelPanel({
       setError(e instanceof Error ? e.message : "Failed to create reel job");
     } finally {
       setIsStarting(false);
+    }
+  };
+
+  const startInlineReelRename = (reel: ReelJobRow) => {
+    setEditingReelId(reel.id);
+    setReelTitleDraft(reel.title ?? "");
+    setRenameFeedback(null);
+    setError(null);
+  };
+
+  const cancelInlineReelRename = () => {
+    setEditingReelId(null);
+    setReelTitleDraft("");
+  };
+
+  const saveInlineReelRename = async (reel: ReelJobRow) => {
+    if (renamingReelId === reel.id) return;
+
+    const trimmedDraft = reelTitleDraft.trim();
+    const nextTitle = trimmedDraft.length > 0 ? trimmedDraft : null;
+    const currentTitle = reel.title?.trim() || null;
+
+    if (nextTitle === currentTitle) {
+      cancelInlineReelRename();
+      return;
+    }
+
+    try {
+      setRenamingReelId(reel.id);
+      setRenameFeedback(null);
+      setError(null);
+
+      const { error: updateErr } = await supabase
+        .from("reel_jobs")
+        .update({ title: nextTitle })
+        .eq("id", reel.id);
+
+      if (updateErr) throw updateErr;
+
+      setReels((prev) =>
+        prev.map((row) =>
+          row.id === reel.id ? { ...row, title: nextTitle } : row,
+        ),
+      );
+      setRenameFeedback({
+        reelId: reel.id,
+        kind: "success",
+        message: "Reel title saved",
+      });
+      cancelInlineReelRename();
+    } catch (e) {
+      console.error(e);
+      setRenameFeedback({
+        reelId: reel.id,
+        kind: "error",
+        message: "Failed to save title",
+      });
+    } finally {
+      setRenamingReelId(null);
     }
   };
 
@@ -330,19 +409,92 @@ export function HighlightReelPanel({
                     active ? "bg-blue-50" : "hover:bg-gray-50"
                   }`}
                 >
-                  <button
-                    type="button"
-                    className="flex-1 text-left"
-                    onClick={() => setSelectedReelId(r.id)}
+                  <div
+                    className="flex-1 text-left min-w-0"
+                    onClick={() => {
+                      if (editingReelId !== r.id) {
+                        setSelectedReelId(r.id);
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (editingReelId === r.id) return;
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setSelectedReelId(r.id);
+                      }
+                    }}
+                    role="button"
+                    tabIndex={0}
                   >
                     <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium text-gray-900">
-                        {r.title?.trim() ? r.title : "Highlight Reel"}
-                      </span>
+                      {editingReelId === r.id ? (
+                        <Input
+                          autoFocus
+                          value={reelTitleDraft}
+                          onChange={(e) => setReelTitleDraft(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              void saveInlineReelRename(r);
+                              return;
+                            }
+
+                            if (e.key === "Escape") {
+                              e.preventDefault();
+                              skipBlurSaveForReelIdRef.current = r.id;
+                              cancelInlineReelRename();
+                            }
+                          }}
+                          onBlur={() => {
+                            if (skipBlurSaveForReelIdRef.current === r.id) {
+                              skipBlurSaveForReelIdRef.current = null;
+                              return;
+                            }
+                            void saveInlineReelRename(r);
+                          }}
+                          disabled={renamingReelId === r.id}
+                          placeholder="Enter reel title"
+                          className="h-8 mr-2"
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          className="text-sm font-medium text-gray-900 hover:text-[#0047AB] transition-colors text-left truncate max-w-[70%] inline-flex items-center gap-1.5"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            startInlineReelRename(r);
+                          }}
+                          title="Click to rename"
+                        >
+                          <span className="truncate">{getReelTitle(r.title)}</span>
+                          <Pencil className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                        </button>
+                      )}
                       <span className="text-xs text-gray-600">
                         {formatDate(r.created_at)}
                       </span>
                     </div>
+                    {renamingReelId === r.id && (
+                      <div className="mt-1 text-xs text-[#0047AB]">
+                        Saving title...
+                      </div>
+                    )}
+                    {renameFeedback?.reelId === r.id && (
+                      <div
+                        className={`mt-1 text-xs ${
+                          renameFeedback.kind === "success"
+                            ? "text-green-700"
+                            : "text-red-700"
+                        }`}
+                      >
+                        {renameFeedback.message}
+                      </div>
+                    )}
+                    {editingReelId !== r.id && (
+                      <div className="mt-1 text-[11px] text-gray-400">
+                        Click title to rename
+                      </div>
+                    )}
                     <div className="mt-1 flex items-center gap-2 text-xs text-gray-600">
                       <span>
                         Status:{" "}
@@ -380,7 +532,7 @@ export function HighlightReelPanel({
                     {r.status === "failed" && r.error && (
                       <div className="mt-1 text-xs text-red-700">{r.error}</div>
                     )}
-                  </button>
+                  </div>
 
                   <div className="flex items-center gap-1">
                     {isCompleted && (

@@ -79,16 +79,28 @@ async function getFollowCounts(
 
 async function getMatchInfoMap(
   matchIds: string[],
-): Promise<Record<string, { team_name: string; opponent: string }>> {
+): Promise<
+  Record<
+    string,
+    { match_name: string | null; team_name: string | null; opponent: string | null }
+  >
+> {
   if (matchIds.length === 0) return {};
   const supabase = getSupabase();
   const { data } = await supabase
     .from("matches")
-    .select("id, team_name, opponent")
+    .select("id, match_name, team_name, opponent")
     .in("id", matchIds);
-  const map: Record<string, { team_name: string; opponent: string }> = {};
+  const map: Record<
+    string,
+    { match_name: string | null; team_name: string | null; opponent: string | null }
+  > = {};
   for (const m of data ?? []) {
-    map[m.id] = { team_name: m.team_name, opponent: m.opponent };
+    map[m.id] = {
+      match_name: m.match_name ?? null,
+      team_name: m.team_name ?? null,
+      opponent: m.opponent ?? null,
+    };
   }
   return map;
 }
