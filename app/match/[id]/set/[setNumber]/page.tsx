@@ -7,10 +7,12 @@ import { supabase } from "@/lib/supabase";
 import { SiteHeader } from "@/components/ui/site-header";
 import { SiteFooter } from "@/components/ui/site-footer";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { HighlightReelPanel } from "@/components/highlight-reel-panel";
 import { ActionLegend } from "@/components/action-legend";
 import { VideoPlayer, type VideoPlayerHandle } from "@/components/video-player";
 import { actionTypeColors } from "@/lib/match-data";
+import { getMatchTitle } from "@/lib/match-title";
 
 import {
   ArrowLeft,
@@ -91,11 +93,20 @@ export default function MatchHighlightsPage() {
 
   const [match, setMatch] = useState<{
     id: string;
-    homeTeam: string;
-    awayTeam: string;
+    match_name: string | null;
+    team_name: string | null;
+    opponent: string | null;
     date: string;
     videoUrl: string | null;
   } | null>(null);
+  const [isEditingMatchTitle, setIsEditingMatchTitle] = useState(false);
+  const [matchNameDraft, setMatchNameDraft] = useState("");
+  const [isSavingMatchTitle, setIsSavingMatchTitle] = useState(false);
+  const [matchRenameFeedback, setMatchRenameFeedback] = useState<{
+    kind: "success" | "error";
+    message: string;
+  } | null>(null);
+  const skipMatchBlurSaveRef = useRef(false);
 
   // Points for real matches (from Supabase)
   const [points, setPoints] = useState<HighlightPoint[]>([]);
@@ -149,6 +160,78 @@ export default function MatchHighlightsPage() {
     dismiss: (id: string) => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     },
+  };
+
+  useEffect(() => {
+    if (!matchRenameFeedback) return;
+    const timeoutId = window.setTimeout(
+      () => setMatchRenameFeedback(null),
+      3000,
+    );
+    return () => window.clearTimeout(timeoutId);
+  }, [matchRenameFeedback]);
+
+  const startEditingMatchTitle = () => {
+    if (!match) return;
+    setMatchNameDraft(match.match_name ?? "");
+    setIsEditingMatchTitle(true);
+    setMatchRenameFeedback(null);
+  };
+
+  const cancelEditingMatchTitle = () => {
+    setIsEditingMatchTitle(false);
+    setMatchNameDraft("");
+  };
+
+  const saveMatchTitle = async () => {
+    if (!match || isSavingMatchTitle) return;
+
+    const trimmedDraft = matchNameDraft.trim();
+    const nextMatchName = trimmedDraft.length > 0 ? trimmedDraft : null;
+    const currentMatchName = match.match_name?.trim() || null;
+
+    if (nextMatchName === currentMatchName) {
+      cancelEditingMatchTitle();
+      return;
+    }
+
+    try {
+      setIsSavingMatchTitle(true);
+      setMatchRenameFeedback(null);
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) throw new Error("You must be logged in to rename matches");
+
+      const { error } = await supabase
+        .from("matches")
+        .update({ match_name: nextMatchName })
+        .eq("id", match.id)
+        .eq("user_id", user.id);
+
+      if (error) throw error;
+
+      setMatch((prev) =>
+        prev ? { ...prev, match_name: nextMatchName } : prev,
+      );
+      setMatchRenameFeedback({
+        kind: "success",
+        message: "Match title saved",
+      });
+      toast.push("success", "Match title updated");
+      cancelEditingMatchTitle();
+    } catch (e) {
+      console.error(e);
+      setMatchRenameFeedback({
+        kind: "error",
+        message: "Failed to save title",
+      });
+      toast.push("error", "Failed to update match title");
+    } finally {
+      setIsSavingMatchTitle(false);
+    }
   };
 
   // Hotkey handling: map number keys to actions (1..N) and 'm' to mark with current action
@@ -233,7 +316,9 @@ export default function MatchHighlightsPage() {
 
         const { data: matchRow, error: matchErr } = await supabase
           .from("matches")
-          .select("id, match_date, opponent, team_name, video_path, video_url")
+          .select(
+            "id, match_name, match_date, opponent, team_name, video_path, video_url",
+          )
           .eq("id", matchId)
           .single();
 
@@ -253,8 +338,9 @@ export default function MatchHighlightsPage() {
 
         setMatch({
           id: matchRow.id,
-          homeTeam: matchRow.team_name ?? "Home",
-          awayTeam: matchRow.opponent ?? "Away",
+          match_name: matchRow.match_name ?? null,
+          team_name: matchRow.team_name ?? null,
+          opponent: matchRow.opponent ?? null,
           date: matchRow.match_date,
           videoUrl: playableUrl,
         });
@@ -544,9 +630,63 @@ export default function MatchHighlightsPage() {
               </Button>
 
               <div>
-                <h1 className="text-2xl font-bold text-gray-900">
-                  {match.homeTeam} vs {match.awayTeam}
-                </h1>
+                {isEditingMatchTitle ? (
+                  <div className="space-y-1">
+                    <Input
+                      autoFocus
+                      value={matchNameDraft}
+                      onChange={(e) => setMatchNameDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          void saveMatchTitle();
+                          return;
+                        }
+
+                        if (e.key === "Escape") {
+                          e.preventDefault();
+                          skipMatchBlurSaveRef.current = true;
+                          cancelEditingMatchTitle();
+                        }
+                      }}
+                      onBlur={() => {
+                        if (skipMatchBlurSaveRef.current) {
+                          skipMatchBlurSaveRef.current = false;
+                          return;
+                        }
+                        void saveMatchTitle();
+                      }}
+                      disabled={isSavingMatchTitle}
+                      className="h-9 min-w-[18rem]"
+                      placeholder="Enter match title"
+                    />
+                    <p className="text-xs text-gray-500">
+                      Enter to save, Esc to cancel
+                    </p>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="text-left text-2xl font-bold text-gray-900 hover:text-[#0047AB] transition-colors"
+                    onClick={startEditingMatchTitle}
+                  >
+                    {getMatchTitle(match)}
+                  </button>
+                )}
+                {isSavingMatchTitle && (
+                  <p className="text-xs text-[#0047AB] mt-1">Saving title...</p>
+                )}
+                {matchRenameFeedback && (
+                  <p
+                    className={`text-xs mt-1 ${
+                      matchRenameFeedback.kind === "success"
+                        ? "text-green-700"
+                        : "text-red-700"
+                    }`}
+                  >
+                    {matchRenameFeedback.message}
+                  </p>
+                )}
                 <p className="text-sm text-gray-600">
                   {new Date(match.date).toLocaleDateString()}
                 </p>

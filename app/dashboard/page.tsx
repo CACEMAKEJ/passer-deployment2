@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { getMatchTitle } from "@/lib/match-title";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { DatePicker } from "@/components/ui/date-picker";
@@ -16,13 +17,20 @@ import { toast } from "sonner";
 
 interface Match {
   id: string;
-  opponent: string;
-  team_name: string;
+  match_name: string | null;
+  opponent: string | null;
+  team_name: string | null;
   match_date: string;
   video_url: string;
   video_path: string;
   created_at: string;
 }
+
+type RenameFeedback = {
+  matchId: string;
+  kind: "success" | "error";
+  message: string;
+};
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -35,6 +43,13 @@ export default function DashboardPage() {
   const [deletingMatchId, setDeletingMatchId] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [matchToDelete, setMatchToDelete] = useState<Match | null>(null);
+  const [editingMatchId, setEditingMatchId] = useState<string | null>(null);
+  const [matchNameDraft, setMatchNameDraft] = useState("");
+  const [renamingMatchId, setRenamingMatchId] = useState<string | null>(null);
+  const [renameFeedback, setRenameFeedback] = useState<RenameFeedback | null>(
+    null,
+  );
+  const skipBlurSaveRef = useRef(false);
 
   // Check authentication
   useEffect(() => {
@@ -95,6 +110,80 @@ export default function DashboardPage() {
   useEffect(() => {
     fetchMatches();
   }, [fetchMatches]);
+
+  useEffect(() => {
+    if (!renameFeedback) return;
+    const timeoutId = window.setTimeout(() => setRenameFeedback(null), 3000);
+    return () => window.clearTimeout(timeoutId);
+  }, [renameFeedback]);
+
+  const startInlineRename = (match: Match) => {
+    setEditingMatchId(match.id);
+    setMatchNameDraft(match.match_name ?? "");
+    setRenameFeedback(null);
+  };
+
+  const cancelInlineRename = () => {
+    setEditingMatchId(null);
+    setMatchNameDraft("");
+  };
+
+  const saveInlineRename = async (match: Match) => {
+    if (renamingMatchId === match.id) return;
+
+    const trimmedDraft = matchNameDraft.trim();
+    const nextMatchName = trimmedDraft.length > 0 ? trimmedDraft : null;
+    const currentMatchName = match.match_name?.trim() || null;
+
+    if (nextMatchName === currentMatchName) {
+      cancelInlineRename();
+      return;
+    }
+
+    try {
+      setRenamingMatchId(match.id);
+      setRenameFeedback(null);
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        throw new Error("You must be logged in to rename matches");
+      }
+
+      const { error } = await supabase
+        .from("matches")
+        .update({ match_name: nextMatchName })
+        .eq("id", match.id)
+        .eq("user_id", user.id);
+
+      if (error) throw error;
+
+      setMatches((prev) =>
+        prev.map((m) =>
+          m.id === match.id ? { ...m, match_name: nextMatchName } : m,
+        ),
+      );
+      setRenameFeedback({
+        matchId: match.id,
+        kind: "success",
+        message: "Match title saved",
+      });
+      toast.success("Match title updated.");
+      cancelInlineRename();
+    } catch (error) {
+      console.error("Error renaming match:", error);
+      setRenameFeedback({
+        matchId: match.id,
+        kind: "error",
+        message: "Failed to save title",
+      });
+      toast.error("Failed to update match title. Please try again.");
+    } finally {
+      setRenamingMatchId(null);
+    }
+  };
 
   const handleDeleteMatch = (match: Match) => {
     setMatchToDelete(match);
@@ -157,8 +246,14 @@ export default function DashboardPage() {
 
   // Filter matches based on search and date
   const filteredMatches = matches.filter((match) => {
-    const matchesSearch = searchQuery
-      ? match.opponent.toLowerCase().includes(searchQuery.toLowerCase())
+    const normalizedSearch = searchQuery.trim().toLowerCase();
+    const matchesSearch = normalizedSearch
+      ? [
+          match.match_name ?? "",
+          match.team_name ?? "",
+          match.opponent ?? "",
+          getMatchTitle(match),
+        ].some((value) => value.toLowerCase().includes(normalizedSearch))
       : true;
     const matchesDate = dateFilter ? match.match_date === dateFilter : true;
     return matchesSearch && matchesDate;
@@ -193,7 +288,7 @@ export default function DashboardPage() {
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                   <Input
                     type="text"
-                    placeholder="Search by opponent or match details..."
+                    placeholder="Search by title, team, or opponent..."
                     className="h-11 pl-10"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
@@ -272,9 +367,63 @@ export default function DashboardPage() {
                   >
                     <Card className="p-6 border-[#c9dbf3] bg-white/74 flex flex-col">
                       <div className="flex-1 space-y-3">
-                        <h3 className="text-lg font-semibold text-gray-900">
-                          {match.team_name || "DkIT VC"} vs {match.opponent}
-                        </h3>
+                        {editingMatchId === match.id ? (
+                          <div className="space-y-1">
+                            <Input
+                              autoFocus
+                              value={matchNameDraft}
+                              onChange={(e) => setMatchNameDraft(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  void saveInlineRename(match);
+                                  return;
+                                }
+
+                                if (e.key === "Escape") {
+                                  e.preventDefault();
+                                  skipBlurSaveRef.current = true;
+                                  cancelInlineRename();
+                                }
+                              }}
+                              onBlur={() => {
+                                if (skipBlurSaveRef.current) {
+                                  skipBlurSaveRef.current = false;
+                                  return;
+                                }
+                                void saveInlineRename(match);
+                              }}
+                              disabled={renamingMatchId === match.id}
+                              className="h-9"
+                              placeholder="Enter match title"
+                            />
+                            <p className="text-xs text-gray-500">
+                              Enter to save, Esc to cancel
+                            </p>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            className="text-left text-lg font-semibold text-gray-900 hover:text-[#0047AB] transition-colors"
+                            onClick={() => startInlineRename(match)}
+                          >
+                            {getMatchTitle(match)}
+                          </button>
+                        )}
+                        {renamingMatchId === match.id && (
+                          <p className="text-xs text-[#0047AB]">Saving title...</p>
+                        )}
+                        {renameFeedback?.matchId === match.id && (
+                          <p
+                            className={`text-xs ${
+                              renameFeedback.kind === "success"
+                                ? "text-green-700"
+                                : "text-red-700"
+                            }`}
+                          >
+                            {renameFeedback.message}
+                          </p>
+                        )}
                         <p className="text-sm text-gray-600">
                           Date:{" "}
                           {new Date(match.match_date).toLocaleDateString()}
@@ -324,11 +473,7 @@ export default function DashboardPage() {
         title="Delete Match"
         description={
           matchToDelete
-            ? `Are you sure you want to delete "${
-                matchToDelete.team_name || "DkIT VC"
-              } vs ${
-                matchToDelete.opponent
-              }"? This will permanently delete the match video and all associated data. This action cannot be undone.`
+            ? `Are you sure you want to delete "${getMatchTitle(matchToDelete)}"? This will permanently delete the match video and all associated data. This action cannot be undone.`
             : ""
         }
         confirmText="Delete Match"
