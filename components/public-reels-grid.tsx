@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Calendar, Film, Play, X } from "lucide-react";
 import { ReelLikeButton } from "@/components/reel-like-button";
+import { getMatchTitle, getReelTitle } from "@/lib/match-title";
 
 type PublicReel = {
   id: string;
@@ -13,12 +14,14 @@ type PublicReel = {
   match_id: string | null;
 };
 
-type MatchInfo = { team_name: string; opponent: string };
+type MatchInfo = {
+  match_name: string | null;
+  team_name: string | null;
+  opponent: string | null;
+};
 
 function formatMatch(info: MatchInfo) {
-  return info.team_name && info.opponent
-    ? `${info.team_name} vs ${info.opponent}`
-    : info.opponent || info.team_name;
+  return getMatchTitle(info);
 }
 
 export function PublicReelsGrid({
@@ -122,7 +125,7 @@ export function PublicReelsGrid({
               <div className="px-3 py-2.5">
                 <div className="flex items-center justify-between gap-2">
                   <h4 className="text-sm font-semibold text-gray-900 truncate">
-                    {reel.title || "Highlight Reel"}
+                    {getReelTitle(reel.title)}
                   </h4>
                   <ReelLikeButton
                     reelId={reel.id}
@@ -175,7 +178,7 @@ export function PublicReelsGrid({
           <Dialog.Overlay className="fixed inset-0 bg-black/80 z-50" />
           <Dialog.Content className="fixed z-50 left-1/2 top-1/2 w-[92vw] max-w-3xl -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-black shadow-2xl overflow-hidden">
             <Dialog.Title className="sr-only">
-              {selectedReel?.title || "Highlight Reel"}
+              {getReelTitle(selectedReel?.title)}
             </Dialog.Title>
             <Dialog.Description className="sr-only">
               Playing highlight reel video
@@ -200,7 +203,7 @@ export function PublicReelsGrid({
             )}
             <div className="px-4 py-3 bg-gray-900">
               <p className="text-white text-sm font-medium">
-                {selectedReel?.title || "Highlight Reel"}
+                {getReelTitle(selectedReel?.title)}
               </p>
               {selectedReel?.match_id &&
                 matchInfoMap[selectedReel.match_id] && (

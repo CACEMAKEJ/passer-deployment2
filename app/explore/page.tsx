@@ -3,10 +3,12 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { getReelTitle } from "@/lib/match-title";
 import { SiteHeader } from "@/components/ui/site-header";
 import { SiteFooter } from "@/components/ui/site-footer";
 import { Button } from "@/components/ui/button";
 import { ReelLikeButton } from "@/components/reel-like-button";
+import { Input } from "@/components/ui/input";
 import Image from "next/image";
 import Link from "next/link";
 import {
@@ -21,6 +23,7 @@ import {
   Volume2,
   VolumeX,
   Search,
+  Pencil,
 } from "lucide-react";
 import { motion, useReducedMotion } from "framer-motion";
 
@@ -32,11 +35,18 @@ type ExploreReel = {
   output_url: string | null;
   created_at: string;
   user_id: string;
+  match_id: string | null;
   creator: {
     username: string;
     display_name: string;
     avatar_url: string | null;
   } | null;
+};
+
+type ReelRenameFeedback = {
+  reelId: string;
+  kind: "success" | "error";
+  message: string;
 };
 
 type SearchResult = {
@@ -61,6 +71,13 @@ export default function ExplorePage() {
   const [hasMore, setHasMore] = useState(true);
   const [likeCounts, setLikeCounts] = useState<Record<string, number>>({});
   const [likedReelIds, setLikedReelIds] = useState<Set<string>>(new Set());
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [editingReelId, setEditingReelId] = useState<string | null>(null);
+  const [reelTitleDraft, setReelTitleDraft] = useState("");
+  const [renamingReelId, setRenamingReelId] = useState<string | null>(null);
+  const [renameFeedback, setRenameFeedback] =
+    useState<ReelRenameFeedback | null>(null);
+  const skipBlurSaveForReelIdRef = useRef<string | null>(null);
 
   // Feed state
   const [feedOpen, setFeedOpen] = useState(false);
@@ -73,10 +90,16 @@ export default function ExplorePage() {
   const [searchActive, setSearchActive] = useState(false);
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  useEffect(() => {
+    if (!renameFeedback) return;
+    const timeoutId = window.setTimeout(() => setRenameFeedback(null), 3000);
+    return () => window.clearTimeout(timeoutId);
+  }, [renameFeedback]);
+
   const fetchReels = useCallback(async (offset: number, append: boolean) => {
     const { data: reelData, error: reelErr } = await supabase
       .from("reel_jobs")
-      .select("id, title, output_url, created_at, user_id")
+      .select("id, title, output_url, created_at, user_id, match_id")
       .eq("status", "complete")
       .eq("is_public", true)
       .eq("show_on_explore", true)
@@ -89,6 +112,7 @@ export default function ExplorePage() {
     }
 
     const rows = reelData ?? [];
+
     const userIds = [...new Set(rows.map((r) => r.user_id))];
     const creatorMap = new Map<
       string,
@@ -116,6 +140,7 @@ export default function ExplorePage() {
       output_url: row.output_url,
       created_at: row.created_at,
       user_id: row.user_id,
+      match_id: row.match_id,
       creator: creatorMap.get(row.user_id) ?? null,
     }));
 
@@ -124,8 +149,75 @@ export default function ExplorePage() {
     } else {
       setReels(mapped);
     }
+
     setHasMore(rows.length === PAGE_SIZE);
   }, []);
+
+  const canEditReelTitle = useCallback(
+    (reel: ExploreReel) => {
+      return !!currentUserId && reel.user_id === currentUserId;
+    },
+    [currentUserId],
+  );
+
+  const startInlineReelRename = (reel: ExploreReel) => {
+    if (!canEditReelTitle(reel)) return;
+    setEditingReelId(reel.id);
+    setReelTitleDraft(reel.title ?? "");
+    setRenameFeedback(null);
+  };
+
+  const cancelInlineReelRename = () => {
+    setEditingReelId(null);
+    setReelTitleDraft("");
+  };
+
+  const saveInlineReelRename = async (reel: ExploreReel) => {
+    if (!currentUserId || renamingReelId === reel.id || !canEditReelTitle(reel)) {
+      return;
+    }
+
+    const trimmedDraft = reelTitleDraft.trim();
+    const nextTitle = trimmedDraft.length > 0 ? trimmedDraft : null;
+    const currentTitle = reel.title?.trim() || null;
+
+    if (nextTitle === currentTitle) {
+      cancelInlineReelRename();
+      return;
+    }
+
+    try {
+      setRenamingReelId(reel.id);
+      setRenameFeedback(null);
+
+      const { error } = await supabase
+        .from("reel_jobs")
+        .update({ title: nextTitle })
+        .eq("id", reel.id)
+        .eq("user_id", currentUserId);
+
+      if (error) throw error;
+
+      setReels((prev) =>
+        prev.map((r) => (r.id === reel.id ? { ...r, title: nextTitle } : r)),
+      );
+      setRenameFeedback({
+        reelId: reel.id,
+        kind: "success",
+        message: "Reel title saved",
+      });
+      cancelInlineReelRename();
+    } catch (e) {
+      console.error("Failed to rename reel title:", e);
+      setRenameFeedback({
+        reelId: reel.id,
+        kind: "error",
+        message: "Failed to save title",
+      });
+    } finally {
+      setRenamingReelId(null);
+    }
+  };
 
   useEffect(() => {
     const init = async () => {
@@ -134,6 +226,8 @@ export default function ExplorePage() {
         router.push("/login");
         return;
       }
+      const viewerUserId = data.session.user.id;
+      setCurrentUserId(viewerUserId);
       setAuthed(true);
       await fetchReels(0, false);
       setLoading(false);
@@ -429,7 +523,7 @@ export default function ExplorePage() {
                     key={reel.id}
                     reel={reel}
                     index={idx}
-                    onClick={() => openFeed(idx)}
+                    onOpen={() => openFeed(idx)}
                     likeCount={likeCounts[reel.id] ?? 0}
                     isLiked={likedReelIds.has(reel.id)}
                     onLikeChange={(nextLiked, nextCount) => {
@@ -446,6 +540,26 @@ export default function ExplorePage() {
                         }
                         return next;
                       });
+                    }}
+                    canRename={canEditReelTitle(reel)}
+                    isEditing={editingReelId === reel.id}
+                    isSavingTitle={renamingReelId === reel.id}
+                    titleDraft={reelTitleDraft}
+                    feedback={
+                      renameFeedback?.reelId === reel.id ? renameFeedback : null
+                    }
+                    onStartRename={() => startInlineReelRename(reel)}
+                    onDraftTitleChange={setReelTitleDraft}
+                    onSaveRename={() => {
+                      if (skipBlurSaveForReelIdRef.current === reel.id) {
+                        skipBlurSaveForReelIdRef.current = null;
+                        return;
+                      }
+                      void saveInlineReelRename(reel);
+                    }}
+                    onCancelRename={cancelInlineReelRename}
+                    onMarkSkipBlurSave={() => {
+                      skipBlurSaveForReelIdRef.current = reel.id;
                     }}
                   />
                 ))}
@@ -487,32 +601,57 @@ export default function ExplorePage() {
 function ReelCard({
   reel,
   index,
-  onClick,
   likeCount,
   isLiked,
   onLikeChange,
+  onOpen,
+  canRename,
+  isEditing,
+  isSavingTitle,
+  titleDraft,
+  feedback,
+  onStartRename,
+  onDraftTitleChange,
+  onSaveRename,
+  onCancelRename,
+  onMarkSkipBlurSave,
 }: {
   reel: ExploreReel;
   index: number;
-  onClick: () => void;
   likeCount: number;
   isLiked: boolean;
   onLikeChange: (liked: boolean, count: number) => void;
+  onOpen: () => void;
+  canRename: boolean;
+  isEditing: boolean;
+  isSavingTitle: boolean;
+  titleDraft: string;
+  feedback: ReelRenameFeedback | null;
+  onStartRename: () => void;
+  onDraftTitleChange: (value: string) => void;
+  onSaveRename: () => void;
+  onCancelRename: () => void;
+  onMarkSkipBlurSave: () => void;
 }) {
   const prefersReducedMotion = useReducedMotion();
 
   return (
     <motion.div
-      onClick={onClick}
       role="button"
       tabIndex={0}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onClick();
+      onClick={() => {
+        if (!isEditing) {
+          onOpen();
         }
       }}
-      className="group relative rounded-2xl overflow-hidden border border-white/75 bg-white/75 backdrop-blur-lg hover:shadow-[0_20px_38px_-24px_rgba(0,71,171,0.95)] transition-shadow text-left w-full hover-border-glow cursor-pointer"
+      onKeyDown={(e) => {
+        if (isEditing) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
+          className="group relative rounded-2xl overflow-hidden border border-white/75 bg-white/75 backdrop-blur-lg hover:shadow-[0_20px_38px_-24px_rgba(0,71,171,0.95)] transition-shadow text-left w-full hover-border-glow cursor-pointer"
       initial={prefersReducedMotion ? false : { opacity: 0, y: 24 }}
       whileInView={prefersReducedMotion ? undefined : { opacity: 1, y: 0 }}
       viewport={{ once: true, amount: 0.15 }}
@@ -571,9 +710,70 @@ function ReelCard({
                 "Unknown"}
             </span>
           </div>
-          <p className="text-white/80 text-xs mt-1 truncate">
-            {reel.title || "Highlight Reel"}
-          </p>
+          {isEditing ? (
+            <div className="mt-1" onClick={(e) => e.stopPropagation()}>
+              <Input
+                autoFocus
+                value={titleDraft}
+                onChange={(e) => onDraftTitleChange(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    onSaveRename();
+                    return;
+                  }
+
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    onMarkSkipBlurSave();
+                    onCancelRename();
+                  }
+                }}
+                onBlur={onSaveRename}
+                disabled={isSavingTitle}
+                className="h-7 text-xs bg-black/60 border-white/30 text-white placeholder:text-white/60"
+                placeholder="Enter reel title"
+              />
+              <p className="text-white/70 text-[10px] mt-1">
+                Enter to save, Esc to cancel
+              </p>
+            </div>
+          ) : (
+            <div className="mt-1 flex items-center gap-1.5">
+              <p className="text-white/80 text-xs truncate flex-1">
+                {getReelTitle(reel.title)}
+              </p>
+              {canRename && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onStartRename();
+                  }}
+                  className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-black/40 hover:bg-black/60 text-white/85"
+                  title="Click to rename"
+                  aria-label="Rename reel"
+                >
+                  <Pencil className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+          )}
+          {canRename && !isEditing && (
+            <p className="text-white/60 text-[10px] mt-1">Editable title</p>
+          )}
+          {isSavingTitle && (
+            <p className="text-blue-200 text-[10px] mt-1">Saving title...</p>
+          )}
+          {feedback && (
+            <p
+              className={`text-[10px] mt-1 ${
+                feedback.kind === "success" ? "text-green-200" : "text-red-200"
+              }`}
+            >
+              {feedback.message}
+            </p>
+          )}
         </div>
       </div>
     </motion.div>
@@ -805,7 +1005,7 @@ function ReelFeed({
               </div>
               {/* Title + date */}
               <p className="text-white text-sm font-medium truncate">
-                {r.title || "Highlight Reel"}
+                {getReelTitle(r.title)}
               </p>
               <p className="text-white/50 text-xs mt-1">
                 {new Date(r.created_at).toLocaleDateString(undefined, {

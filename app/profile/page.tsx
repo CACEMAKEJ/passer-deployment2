@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState, Suspense } from "react";
+import { useEffect, useMemo, useRef, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { getMatchTitle, getReelTitle } from "@/lib/match-title";
 import { SiteHeader } from "@/components/ui/site-header";
 import { SiteFooter } from "@/components/ui/site-footer";
 import { Button } from "@/components/ui/button";
@@ -26,6 +27,7 @@ import {
   Lock,
   Globe,
   Link2,
+  Pencil,
 } from "lucide-react";
 
 type ReelItem = {
@@ -42,8 +44,15 @@ type ReelFilter = "all" | "public" | "private";
 type ReelSort = "newest" | "oldest";
 
 type MatchInfo = {
-  team_name: string;
-  opponent: string;
+  match_name: string | null;
+  team_name: string | null;
+  opponent: string | null;
+};
+
+type ReelRenameFeedback = {
+  reelId: string;
+  kind: "success" | "error";
+  message: string;
 };
 
 const VOLLEYBALL_POSITIONS = [
@@ -102,6 +111,12 @@ function ProfilePageInner() {
   const [matchInfoMap, setMatchInfoMap] = useState<Record<string, MatchInfo>>(
     {},
   );
+  const [editingReelId, setEditingReelId] = useState<string | null>(null);
+  const [reelTitleDraft, setReelTitleDraft] = useState("");
+  const [renamingReelId, setRenamingReelId] = useState<string | null>(null);
+  const [reelRenameFeedback, setReelRenameFeedback] =
+    useState<ReelRenameFeedback | null>(null);
+  const skipReelBlurSaveRef = useRef<string | null>(null);
 
   const toggleReelPrivacy = async (
     reelId: string,
@@ -159,6 +174,74 @@ function ProfilePageInner() {
       console.error("Failed to toggle explore visibility:", e);
     } finally {
       setTogglingReelId(null);
+    }
+  };
+
+  useEffect(() => {
+    if (!reelRenameFeedback) return;
+    const timeoutId = window.setTimeout(
+      () => setReelRenameFeedback(null),
+      3000,
+    );
+    return () => window.clearTimeout(timeoutId);
+  }, [reelRenameFeedback]);
+
+  const startInlineReelRename = (reel: ReelItem) => {
+    setEditingReelId(reel.id);
+    setReelTitleDraft(reel.title ?? "");
+    setReelRenameFeedback(null);
+  };
+
+  const cancelInlineReelRename = () => {
+    setEditingReelId(null);
+    setReelTitleDraft("");
+  };
+
+  const saveInlineReelRename = async (reel: ReelItem) => {
+    if (!user?.id || renamingReelId === reel.id) return;
+
+    const trimmedDraft = reelTitleDraft.trim();
+    const nextTitle = trimmedDraft.length > 0 ? trimmedDraft : null;
+    const currentTitle = reel.title?.trim() || null;
+
+    if (nextTitle === currentTitle) {
+      cancelInlineReelRename();
+      return;
+    }
+
+    try {
+      setRenamingReelId(reel.id);
+      setReelRenameFeedback(null);
+
+      const { error } = await supabase
+        .from("reel_jobs")
+        .update({ title: nextTitle })
+        .eq("id", reel.id)
+        .eq("user_id", user.id);
+
+      if (error) throw error;
+
+      setReels((prev) =>
+        prev.map((r) => (r.id === reel.id ? { ...r, title: nextTitle } : r)),
+      );
+      setSelectedReel((prev) =>
+        prev && prev.id === reel.id ? { ...prev, title: nextTitle } : prev,
+      );
+      setReelRenameFeedback({
+        reelId: reel.id,
+        kind: "success",
+        message: "Reel title saved",
+      });
+      cancelInlineReelRename();
+    } catch (e) {
+      console.error("Failed to rename reel title:", e);
+      setReelRenameFeedback({
+        reelId: reel.id,
+        kind: "error",
+        message: "Failed to save title",
+      });
+    } finally {
+      setRenamingReelId(null);
     }
   };
 
@@ -309,14 +392,15 @@ function ProfilePageInner() {
       if (matchIds.length > 0) {
         const { data: matchData } = await supabase
           .from("matches")
-          .select("id, team_name, opponent")
+          .select("id, match_name, team_name, opponent")
           .in("id", matchIds);
         if (matchData) {
           const infoMap: Record<string, MatchInfo> = {};
           for (const m of matchData) {
             infoMap[m.id] = {
-              team_name: m.team_name || "",
-              opponent: m.opponent || "",
+              match_name: m.match_name ?? null,
+              team_name: m.team_name ?? null,
+              opponent: m.opponent ?? null,
             };
           }
           setMatchInfoMap(infoMap);
@@ -673,7 +757,11 @@ function ProfilePageInner() {
                   <div
                     key={reel.id}
                     className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow cursor-pointer group"
-                    onClick={() => setSelectedReel(reel)}
+                    onClick={() => {
+                      if (editingReelId !== reel.id) {
+                        setSelectedReel(reel);
+                      }
+                    }}
                   >
                     {/* Thumbnail */}
                     <div className="aspect-video bg-gray-100 relative overflow-hidden">
@@ -776,10 +864,85 @@ function ProfilePageInner() {
 
                     {/* Card body */}
                     <div className="px-3 py-2.5">
-                      <div className="flex items-center justify-between gap-2">
-                        <h4 className="text-sm font-semibold text-gray-900 truncate">
-                          {reel.title || "Highlight Reel"}
-                        </h4>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          {editingReelId === reel.id ? (
+                            <div
+                              className="space-y-1"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <Input
+                                autoFocus
+                                value={reelTitleDraft}
+                                onChange={(e) =>
+                                  setReelTitleDraft(e.target.value)
+                                }
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    void saveInlineReelRename(reel);
+                                    return;
+                                  }
+
+                                  if (e.key === "Escape") {
+                                    e.preventDefault();
+                                    skipReelBlurSaveRef.current = reel.id;
+                                    cancelInlineReelRename();
+                                  }
+                                }}
+                                onBlur={() => {
+                                  if (skipReelBlurSaveRef.current === reel.id) {
+                                    skipReelBlurSaveRef.current = null;
+                                    return;
+                                  }
+                                  void saveInlineReelRename(reel);
+                                }}
+                                disabled={renamingReelId === reel.id}
+                                className="h-8"
+                                placeholder="Enter reel title"
+                              />
+                              <p className="text-[11px] text-gray-500">
+                                Enter to save, Esc to cancel
+                              </p>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                className="text-sm font-semibold text-gray-900 truncate inline-flex items-center gap-1.5 hover:text-[#0047AB] transition-colors"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  startInlineReelRename(reel);
+                                }}
+                                title="Click to rename"
+                              >
+                                <span className="truncate">
+                                  {getReelTitle(reel.title)}
+                                </span>
+                                <Pencil className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                              </button>
+                              <span className="text-[10px] text-gray-400">
+                                Edit
+                              </span>
+                            </div>
+                          )}
+                          {renamingReelId === reel.id && (
+                            <p className="text-[11px] text-[#0047AB] mt-1">
+                              Saving title...
+                            </p>
+                          )}
+                          {reelRenameFeedback?.reelId === reel.id && (
+                            <p
+                              className={`text-[11px] mt-1 ${
+                                reelRenameFeedback.kind === "success"
+                                  ? "text-green-700"
+                                  : "text-red-700"
+                              }`}
+                            >
+                              {reelRenameFeedback.message}
+                            </p>
+                          )}
+                        </div>
                         <ReelLikeButton
                           reelId={reel.id}
                           initialCount={likeCounts[reel.id] ?? 0}
@@ -805,10 +968,7 @@ function ProfilePageInner() {
                       </div>
                       {matchInfo && (
                         <p className="text-xs text-gray-500 mt-0.5 truncate">
-                          🏐{" "}
-                          {matchInfo.team_name && matchInfo.opponent
-                            ? `${matchInfo.team_name} vs ${matchInfo.opponent}`
-                            : matchInfo.opponent || matchInfo.team_name}
+                          🏐 {getMatchTitle(matchInfo)}
                         </p>
                       )}
                       <div className="flex items-center gap-3 mt-1.5 text-[11px] text-gray-400">
@@ -837,7 +997,7 @@ function ProfilePageInner() {
           <Dialog.Overlay className="fixed inset-0 bg-black/80 z-50" />
           <Dialog.Content className="fixed z-50 left-1/2 top-1/2 w-[92vw] max-w-3xl -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-black shadow-2xl overflow-hidden">
             <Dialog.Title className="sr-only">
-              {selectedReel?.title || "Highlight Reel"}
+              {getReelTitle(selectedReel?.title)}
             </Dialog.Title>
             <Dialog.Description className="sr-only">
               Playing highlight reel video
@@ -863,7 +1023,7 @@ function ProfilePageInner() {
             <div className="px-4 py-3 bg-gray-900">
               <div className="flex items-center justify-between">
                 <p className="text-white text-sm font-medium">
-                  {selectedReel?.title || "Highlight Reel"}
+                  {getReelTitle(selectedReel?.title)}
                 </p>
                 {selectedReel && (
                   <div className="flex items-center gap-1.5">
@@ -893,12 +1053,7 @@ function ProfilePageInner() {
               {selectedReel?.match_id &&
                 matchInfoMap[selectedReel.match_id] && (
                   <p className="text-gray-400 text-xs mt-0.5">
-                    🏐{" "}
-                    {matchInfoMap[selectedReel.match_id].team_name &&
-                    matchInfoMap[selectedReel.match_id].opponent
-                      ? `${matchInfoMap[selectedReel.match_id].team_name} vs ${matchInfoMap[selectedReel.match_id].opponent}`
-                      : matchInfoMap[selectedReel.match_id].opponent ||
-                        matchInfoMap[selectedReel.match_id].team_name}
+                    🏐 {getMatchTitle(matchInfoMap[selectedReel.match_id])}
                   </p>
                 )}
               {selectedReel?.created_at && (

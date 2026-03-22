@@ -29,8 +29,7 @@ export default function UploadPage() {
   >("idle");
   const [errorMessage, setErrorMessage] = useState("");
   const [matchDate, setMatchDate] = useState("");
-  const [opponent, setOpponent] = useState("");
-  const [teamName, setTeamName] = useState("DkIT VC");
+  const [matchName, setMatchName] = useState("");
   const [uploadAbortController, setUploadAbortController] =
     useState<AbortController | null>(null);
 
@@ -170,7 +169,7 @@ export default function UploadPage() {
       return;
     }
 
-    if (!matchDate || !opponent || !teamName) {
+    if (!matchDate) {
       setErrorMessage("Please fill in all required fields");
       setUploadStatus("error");
       return;
@@ -200,14 +199,17 @@ export default function UploadPage() {
       // ✅ Upload to Supabase Storage with progress tracking
       await uploadFileWithProgress(fileName, selectedFile, abortController);
 
+      const normalizedMatchName = matchName.trim();
+
       // ✅ Insert match record into database (store video_path only)
       const { data: inserted, error: dbError } = await supabase
         .from("matches")
         .insert({
           user_id: user.id,
           match_date: matchDate,
-          opponent,
-          team_name: teamName,
+          match_name: normalizedMatchName || null,
+          opponent: "",
+          team_name: "",
           video_path: fileName,
           // video_url: optional; recommended to omit if using signed URLs
         })
@@ -463,33 +465,17 @@ export default function UploadPage() {
             }
           >
             <div className="grid md:grid-cols-2 gap-4 md:gap-6">
-              {/* Team Name */}
-              <div className="space-y-2">
+              {/* Match Name */}
+              <div className="space-y-2 md:col-span-2">
                 <label className="text-sm font-medium text-gray-900">
-                  Your Team Name
+                  Match Name
                 </label>
                 <Input
                   type="text"
-                  placeholder="e.g., DkIT VC"
+                  placeholder="e.g., DkIT VC vs St. Mary's College"
                   className="h-11 bg-gray-50 border-gray-200"
-                  value={teamName}
-                  onChange={(e) => setTeamName(e.target.value)}
-                  required
-                />
-              </div>
-
-              {/* Opponent */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-900">
-                  Opponent Team
-                </label>
-                <Input
-                  type="text"
-                  placeholder="e.g., St. Mary's College"
-                  className="h-11 bg-gray-50 border-gray-200"
-                  value={opponent}
-                  onChange={(e) => setOpponent(e.target.value)}
-                  required
+                  value={matchName}
+                  onChange={(e) => setMatchName(e.target.value)}
                 />
               </div>
 
@@ -513,9 +499,7 @@ export default function UploadPage() {
               disabled={
                 isUploading ||
                 !selectedFile ||
-                !matchDate ||
-                !opponent ||
-                !teamName
+                !matchDate
               }
               className="w-full h-12 mt-6 bg-gradient-to-r from-[#0047AB] to-[#E8A550] hover:opacity-90 text-white font-medium disabled:opacity-50 disabled:cursor-not-allowed"
             >
