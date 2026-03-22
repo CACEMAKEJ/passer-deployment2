@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { DatePicker } from "@/components/ui/date-picker";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Card } from "@/components/ui/card";
-import { Search, Trash2 } from "lucide-react";
+import { Search, Trash2, Pencil } from "lucide-react";
 import { SiteHeader } from "@/components/ui/site-header";
 import { SiteFooter } from "@/components/ui/site-footer";
 import { motion, useReducedMotion } from "framer-motion";
@@ -406,9 +406,18 @@ export default function DashboardPage() {
                             type="button"
                             className="text-left text-lg font-semibold text-gray-900 hover:text-[#0047AB] transition-colors"
                             onClick={() => startInlineRename(match)}
+                            title="Click to rename"
                           >
-                            {getMatchTitle(match)}
+                            <span className="inline-flex items-center gap-1.5">
+                              {getMatchTitle(match)}
+                              <Pencil className="w-3.5 h-3.5 text-gray-400" />
+                            </span>
                           </button>
+                        )}
+                        {editingMatchId !== match.id && (
+                          <p className="text-xs text-gray-400">
+                            Click title to rename
+                          </p>
                         )}
                         {renamingMatchId === match.id && (
                           <p className="text-xs text-[#0047AB]">Saving title...</p>

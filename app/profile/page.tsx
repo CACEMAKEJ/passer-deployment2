@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { getMatchTitle, getReelTitle } from "@/lib/match-title";
@@ -26,6 +26,7 @@ import {
   Lock,
   Globe,
   Link2,
+  Pencil,
 } from "lucide-react";
 
 type ReelItem = {
@@ -45,6 +46,12 @@ type MatchInfo = {
   match_name: string | null;
   team_name: string | null;
   opponent: string | null;
+};
+
+type ReelRenameFeedback = {
+  reelId: string;
+  kind: "success" | "error";
+  message: string;
 };
 
 const VOLLEYBALL_POSITIONS = [
@@ -100,6 +107,12 @@ export default function ProfilePage() {
   const [matchInfoMap, setMatchInfoMap] = useState<Record<string, MatchInfo>>(
     {},
   );
+  const [editingReelId, setEditingReelId] = useState<string | null>(null);
+  const [reelTitleDraft, setReelTitleDraft] = useState("");
+  const [renamingReelId, setRenamingReelId] = useState<string | null>(null);
+  const [reelRenameFeedback, setReelRenameFeedback] =
+    useState<ReelRenameFeedback | null>(null);
+  const skipReelBlurSaveRef = useRef<string | null>(null);
 
   const toggleReelPrivacy = async (
     reelId: string,
@@ -157,6 +170,74 @@ export default function ProfilePage() {
       console.error("Failed to toggle explore visibility:", e);
     } finally {
       setTogglingReelId(null);
+    }
+  };
+
+  useEffect(() => {
+    if (!reelRenameFeedback) return;
+    const timeoutId = window.setTimeout(
+      () => setReelRenameFeedback(null),
+      3000,
+    );
+    return () => window.clearTimeout(timeoutId);
+  }, [reelRenameFeedback]);
+
+  const startInlineReelRename = (reel: ReelItem) => {
+    setEditingReelId(reel.id);
+    setReelTitleDraft(reel.title ?? "");
+    setReelRenameFeedback(null);
+  };
+
+  const cancelInlineReelRename = () => {
+    setEditingReelId(null);
+    setReelTitleDraft("");
+  };
+
+  const saveInlineReelRename = async (reel: ReelItem) => {
+    if (!user?.id || renamingReelId === reel.id) return;
+
+    const trimmedDraft = reelTitleDraft.trim();
+    const nextTitle = trimmedDraft.length > 0 ? trimmedDraft : null;
+    const currentTitle = reel.title?.trim() || null;
+
+    if (nextTitle === currentTitle) {
+      cancelInlineReelRename();
+      return;
+    }
+
+    try {
+      setRenamingReelId(reel.id);
+      setReelRenameFeedback(null);
+
+      const { error } = await supabase
+        .from("reel_jobs")
+        .update({ title: nextTitle })
+        .eq("id", reel.id)
+        .eq("user_id", user.id);
+
+      if (error) throw error;
+
+      setReels((prev) =>
+        prev.map((r) => (r.id === reel.id ? { ...r, title: nextTitle } : r)),
+      );
+      setSelectedReel((prev) =>
+        prev && prev.id === reel.id ? { ...prev, title: nextTitle } : prev,
+      );
+      setReelRenameFeedback({
+        reelId: reel.id,
+        kind: "success",
+        message: "Reel title saved",
+      });
+      cancelInlineReelRename();
+    } catch (e) {
+      console.error("Failed to rename reel title:", e);
+      setReelRenameFeedback({
+        reelId: reel.id,
+        kind: "error",
+        message: "Failed to save title",
+      });
+    } finally {
+      setRenamingReelId(null);
     }
   };
 
@@ -622,7 +703,11 @@ export default function ProfilePage() {
                   <div
                     key={reel.id}
                     className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow cursor-pointer group"
-                    onClick={() => setSelectedReel(reel)}
+                    onClick={() => {
+                      if (editingReelId !== reel.id) {
+                        setSelectedReel(reel);
+                      }
+                    }}
                   >
                     {/* Thumbnail */}
                     <div className="aspect-video bg-gray-100 relative overflow-hidden">
@@ -725,9 +810,76 @@ export default function ProfilePage() {
 
                     {/* Card body */}
                     <div className="px-3 py-2.5">
-                      <h4 className="text-sm font-semibold text-gray-900 truncate">
-                        {getReelTitle(reel.title)}
-                      </h4>
+                      {editingReelId === reel.id ? (
+                        <div
+                          className="space-y-1"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <Input
+                            autoFocus
+                            value={reelTitleDraft}
+                            onChange={(e) => setReelTitleDraft(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                void saveInlineReelRename(reel);
+                                return;
+                              }
+
+                              if (e.key === "Escape") {
+                                e.preventDefault();
+                                skipReelBlurSaveRef.current = reel.id;
+                                cancelInlineReelRename();
+                              }
+                            }}
+                            onBlur={() => {
+                              if (skipReelBlurSaveRef.current === reel.id) {
+                                skipReelBlurSaveRef.current = null;
+                                return;
+                              }
+                              void saveInlineReelRename(reel);
+                            }}
+                            disabled={renamingReelId === reel.id}
+                            className="h-8"
+                            placeholder="Enter reel title"
+                          />
+                          <p className="text-[11px] text-gray-500">
+                            Enter to save, Esc to cancel
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            className="text-sm font-semibold text-gray-900 truncate inline-flex items-center gap-1.5 hover:text-[#0047AB] transition-colors"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              startInlineReelRename(reel);
+                            }}
+                            title="Click to rename"
+                          >
+                            <span className="truncate">{getReelTitle(reel.title)}</span>
+                            <Pencil className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                          </button>
+                          <span className="text-[10px] text-gray-400">Edit</span>
+                        </div>
+                      )}
+                      {renamingReelId === reel.id && (
+                        <p className="text-[11px] text-[#0047AB] mt-1">
+                          Saving title...
+                        </p>
+                      )}
+                      {reelRenameFeedback?.reelId === reel.id && (
+                        <p
+                          className={`text-[11px] mt-1 ${
+                            reelRenameFeedback.kind === "success"
+                              ? "text-green-700"
+                              : "text-red-700"
+                          }`}
+                        >
+                          {reelRenameFeedback.message}
+                        </p>
+                      )}
                       {matchInfo && (
                         <p className="text-xs text-gray-500 mt-0.5 truncate">
                           🏐 {getMatchTitle(matchInfo)}

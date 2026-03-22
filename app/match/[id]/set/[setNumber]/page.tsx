@@ -21,6 +21,7 @@ import {
   X,
   CheckSquare,
   Square,
+  Pencil,
 } from "lucide-react";
 
 type HighlightAction =
@@ -38,6 +39,14 @@ type HighlightPoint = {
   action: HighlightAction;
   clipBefore?: number; // seconds to include before the timestamp
   clipAfter?: number; // seconds to include after the timestamp
+};
+
+type MatchPointRow = {
+  id: string;
+  timestamp_seconds: number;
+  label: string | null;
+  clip_before: number | null;
+  clip_after: number | null;
 };
 
 type ToastKind = "success" | "error";
@@ -353,12 +362,12 @@ export default function MatchHighlightsPage() {
 
         if (ptsErr) throw ptsErr;
 
-        const loaded = (pts ?? []).map((p) => ({
+        const loaded = ((pts ?? []) as MatchPointRow[]).map((p) => ({
           id: p.id,
           timestamp: Number(p.timestamp_seconds),
           action: ((p.label as HighlightAction) ?? "other") as HighlightAction,
-          clipBefore: (p as any).clip_before ?? MARK_OFFSET_SECONDS,
-          clipAfter: (p as any).clip_after ?? MARK_OFFSET_SECONDS,
+          clipBefore: p.clip_before ?? MARK_OFFSET_SECONDS,
+          clipAfter: p.clip_after ?? MARK_OFFSET_SECONDS,
         }));
         setPoints(loaded);
         setSelectedPointIds(new Set(loaded.map((p) => p.id)));
@@ -669,9 +678,18 @@ export default function MatchHighlightsPage() {
                     type="button"
                     className="text-left text-2xl font-bold text-gray-900 hover:text-[#0047AB] transition-colors"
                     onClick={startEditingMatchTitle}
+                    title="Click to rename"
                   >
-                    {getMatchTitle(match)}
+                    <span className="inline-flex items-center gap-2">
+                      {getMatchTitle(match)}
+                      <Pencil className="w-4 h-4 text-gray-400" />
+                    </span>
                   </button>
+                )}
+                {!isEditingMatchTitle && (
+                  <p className="text-xs text-gray-400 mt-1">
+                    Click title to rename
+                  </p>
                 )}
                 {isSavingMatchTitle && (
                   <p className="text-xs text-[#0047AB] mt-1">Saving title...</p>
@@ -837,7 +855,9 @@ export default function MatchHighlightsPage() {
                       items={ACTIONS.map((a, i) => ({
                         keyLabel: `${i + 1}`,
                         label: a.toUpperCase(),
-                        color: (actionTypeColors as any)[a] ?? "#9CA3AF",
+                        color:
+                          (actionTypeColors as Record<string, string>)[a] ??
+                          "#9CA3AF",
                       }))}
                     />
                   </div>

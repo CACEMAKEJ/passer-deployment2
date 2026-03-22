@@ -5,7 +5,7 @@ import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { getReelTitle } from "@/lib/match-title";
-import { Trash2, Loader2, Eye, EyeOff, Globe } from "lucide-react";
+import { Trash2, Loader2, Eye, EyeOff, Globe, Pencil } from "lucide-react";
 
 type ReelJobStatus = "queued" | "processing" | "complete" | "failed";
 
@@ -459,14 +459,15 @@ export function HighlightReelPanel({
                       ) : (
                         <button
                           type="button"
-                          className="text-sm font-medium text-gray-900 hover:text-[#0047AB] transition-colors text-left truncate max-w-[70%]"
+                          className="text-sm font-medium text-gray-900 hover:text-[#0047AB] transition-colors text-left truncate max-w-[70%] inline-flex items-center gap-1.5"
                           onClick={(e) => {
                             e.stopPropagation();
                             startInlineReelRename(r);
                           }}
-                          title="Rename reel"
+                          title="Click to rename"
                         >
-                          {getReelTitle(r.title)}
+                          <span className="truncate">{getReelTitle(r.title)}</span>
+                          <Pencil className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
                         </button>
                       )}
                       <span className="text-xs text-gray-600">
@@ -487,6 +488,11 @@ export function HighlightReelPanel({
                         }`}
                       >
                         {renameFeedback.message}
+                      </div>
+                    )}
+                    {editingReelId !== r.id && (
+                      <div className="mt-1 text-[11px] text-gray-400">
+                        Click title to rename
                       </div>
                     )}
                     <div className="mt-1 flex items-center gap-2 text-xs text-gray-600">
