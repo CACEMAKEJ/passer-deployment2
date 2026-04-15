@@ -37,14 +37,16 @@ type HighlightPoint = {
   id: string;
   timestamp: number;
   action: HighlightAction;
-  clipBefore?: number;
-  clipAfter?: number;
+  note?: string | null;
+  clipBefore?: number; // seconds to include before the timestamp
+  clipAfter?: number; // seconds to include after the timestamp
 };
 
 type MatchPointRow = {
   id: string;
   timestamp_seconds: number;
   label: string | null;
+  note: string | null;
   clip_before: number | null;
   clip_after: number | null;
 };
@@ -115,6 +117,7 @@ export default function MatchHighlightsPage() {
   const [selectedPointId, setSelectedPointId] = useState<string | null>(null);
   const [selectedAction, setSelectedAction] =
     useState<HighlightAction>("spike");
+  const [noteDraft, setNoteDraft] = useState("");
 
   const [selectedPointIds, setSelectedPointIds] = useState<Set<string>>(
     new Set()
@@ -122,8 +125,10 @@ export default function MatchHighlightsPage() {
   const [isMarking, setIsMarking] = useState(false);
 
   const [dirtyOffsetIds, setDirtyOffsetIds] = useState<Set<string>>(new Set());
+  // Track which point IDs have unsaved offset edits
+  const [dirtyPointIds, setDirtyPointIds] = useState<Set<string>>(new Set());
   const [isSavingOffsets, setIsSavingOffsets] = useState(false);
-  const hasUnsavedOffsets = dirtyOffsetIds.size > 0;
+  const hasUnsavedOffsets = dirtyPointIds.size > 0;
 
   const [activeClipId, setActiveClipId] = useState<string | null>(null);
   const [currentVideoTime, setCurrentVideoTime] = useState(0);
@@ -337,7 +342,7 @@ export default function MatchHighlightsPage() {
 
         const { data: pts, error: ptsErr } = await supabase
           .from("match_points")
-          .select("id, timestamp_seconds, label, clip_before, clip_after")
+          .select("id, timestamp_seconds, label, note, clip_before, clip_after")
           .eq("match_id", matchId)
           .order("timestamp_seconds", { ascending: true });
 
@@ -347,13 +352,14 @@ export default function MatchHighlightsPage() {
           id: p.id,
           timestamp: Number(p.timestamp_seconds),
           action: ((p.label as HighlightAction) ?? "other") as HighlightAction,
+          note: p.note,
           clipBefore: p.clip_before ?? MARK_OFFSET_SECONDS,
           clipAfter: p.clip_after ?? MARK_OFFSET_SECONDS,
         }));
 
         setPoints(loaded);
         setSelectedPointIds(new Set(loaded.map((p) => p.id)));
-        setDirtyOffsetIds(new Set());
+        setDirtyPointIds(new Set());
       } catch (e) {
         setPageError(e instanceof Error ? e.message : "Failed to load match.");
       } finally {
@@ -371,6 +377,7 @@ export default function MatchHighlightsPage() {
 
     const now = playerRef.current?.getCurrentTime() ?? 0;
     const t = Math.max(0, now - MARK_OFFSET_SECONDS);
+    const trimmedNote = noteDraft.trim();
 
     playerRef.current?.seekTo(t);
 
@@ -392,10 +399,11 @@ export default function MatchHighlightsPage() {
           user_id: user.id,
           timestamp_seconds: t,
           label: action ?? prevAction,
+          note: trimmedNote.length > 0 ? trimmedNote : null,
           clip_before: MARK_OFFSET_SECONDS,
           clip_after: MARK_OFFSET_SECONDS,
         })
-        .select("id, timestamp_seconds, label, clip_before, clip_after")
+        .select("id, timestamp_seconds, label, note, clip_before, clip_after")
         .single();
 
       if (insErr) throw insErr;
@@ -404,6 +412,7 @@ export default function MatchHighlightsPage() {
         id: inserted.id,
         timestamp: Number(inserted.timestamp_seconds),
         action: (inserted.label as HighlightAction) ?? "other",
+        note: inserted.note,
         clipBefore: MARK_OFFSET_SECONDS,
         clipAfter: MARK_OFFSET_SECONDS,
       };
@@ -413,6 +422,7 @@ export default function MatchHighlightsPage() {
       setSelectedPointIds((prev) => new Set(prev).add(newPoint.id));
       lastInsertedIdRef.current = newPoint.id;
       setCanUndo(true);
+      setNoteDraft("");
 
       toast.push(
         "success",
@@ -428,20 +438,22 @@ export default function MatchHighlightsPage() {
 
   const updatePointOffset = (
     id: string,
-    updates: { clipBefore?: number; clipAfter?: number }
+    updates: { clipBefore?: number; clipAfter?: number; note?: string | null },
   ) => {
     setPoints((prev) =>
       prev.map((p) => (p.id === id ? { ...p, ...updates } : p))
     );
-    setDirtyOffsetIds((prev) => new Set(prev).add(id));
+    setDirtyPointIds((prev) => new Set(prev).add(id));
   };
 
   const applyOffsets = async () => {
-    if (dirtyOffsetIds.size === 0) return;
+    if (dirtyPointIds.size === 0) return;
     setIsSavingOffsets(true);
 
     try {
-      const dirty = points.filter((p) => dirtyOffsetIds.has(p.id));
+      const dirty = points.filter((p) => dirtyPointIds.has(p.id));
+      // Supabase JS doesn't support batch-updating different rows in one call,
+      // so we fire updates in parallel per dirty point.
       const results = await Promise.all(
         dirty.map((p) =>
           supabase
@@ -449,6 +461,7 @@ export default function MatchHighlightsPage() {
             .update({
               clip_before: p.clipBefore ?? MARK_OFFSET_SECONDS,
               clip_after: p.clipAfter ?? MARK_OFFSET_SECONDS,
+              note: p.note?.trim() ? p.note.trim() : null,
             })
             .eq("id", p.id)
         )
@@ -458,8 +471,8 @@ export default function MatchHighlightsPage() {
       if (failed.length > 0) {
         toast.push("error", `Failed to save ${failed.length} offset(s)`);
       } else {
-        toast.push("success", `Saved offsets for ${dirty.length} point(s)`);
-        setDirtyOffsetIds(new Set());
+        toast.push("success", `Saved changes for ${dirty.length} point(s)`);
+        setDirtyPointIds(new Set());
       }
     } catch (e) {
       console.error(e);
@@ -515,6 +528,11 @@ export default function MatchHighlightsPage() {
       if (error) throw error;
 
       setPoints((prev) => prev.filter((p) => p.id !== id));
+      setDirtyPointIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
       setSelectedPointIds((prev) => {
         const next = new Set(prev);
         next.delete(id);
@@ -598,7 +616,8 @@ export default function MatchHighlightsPage() {
       <SiteHeader showNav={true} activePage="dashboard" />
 
       <main className="flex-1 bg-gray-50 px-4 md:px-6 lg:px-8 py-6 md:py-8">
-        <div className="max-w-6xl mx-auto space-y-6">
+        <div className="max-w-[88rem] mx-auto space-y-6">
+          {/* Header */}
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div className="flex items-center gap-3 md:gap-4 flex-wrap">
               <Button
@@ -688,8 +707,10 @@ export default function MatchHighlightsPage() {
             </div>
           </div>
 
-          <div className="grid md:grid-cols-5 gap-4 md:gap-6 items-start">
-            <div className="md:col-span-3 space-y-4">
+          {/* Layout: video left, highlights right */}
+          <div className="grid md:grid-cols-12 gap-4 md:gap-6 items-start">
+            {/* Video (2/3) */}
+            <div className="md:col-span-8 space-y-4">
               <VideoPlayer
                 ref={playerRef}
                 title="Match Replay"
@@ -737,61 +758,11 @@ export default function MatchHighlightsPage() {
               )}
             </div>
 
-            <div className="md:col-span-2">
+            {/* Highlights panel (1/3) */}
+            <div className="md:col-span-4">
               <div className="bg-white border border-gray-200 rounded-lg overflow-hidden flex flex-col">
-                <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
-                  <span className="text-sm font-medium text-gray-900">
-                    Highlights
-                  </span>
-                  <span className="text-xs text-gray-500">
-                    {selectedPointIds.size}/{sortedPoints.length} selected
-                  </span>
-                </div>
-
-                <div className="p-4 border-b border-gray-200">
-                  <div className="flex gap-2">
-                    <Button
-                      onClick={() => void markHighlight()}
-                      disabled={isMarking}
-                      className="flex-1 bg-[#0047AB] hover:bg-[#003580] text-white disabled:opacity-60"
-                    >
-                      {isMarking
-                        ? "Marking..."
-                        : `Mark Highlight (-${MARK_OFFSET_SECONDS}s)`}
-                    </Button>
-
-                    <Button
-                      variant="outline"
-                      onClick={() => void handleUndo()}
-                      disabled={!canUndo || isMarking}
-                      className="border-gray-300 text-gray-600 disabled:opacity-40"
-                      title="Undo last highlight (Ctrl+Z)"
-                    >
-                      Undo
-                    </Button>
-                  </div>
-
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {ACTIONS.map((action) => {
-                      const active = action === selectedAction;
-                      return (
-                        <button
-                          key={action}
-                          type="button"
-                          onClick={() => setSelectedAction(action)}
-                          className={`px-3 py-2 rounded-md border text-sm font-medium transition-colors ${
-                            active
-                              ? "bg-[#0047AB] text-white border-[#0047AB]"
-                              : "bg-white text-gray-800 border-gray-300 hover:bg-gray-50"
-                          }`}
-                        >
-                          {action.toUpperCase()}
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
+                <div className="px-4 py-4 border-b border-gray-200">
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
                     <div className="flex items-start justify-between gap-3 flex-wrap">
                       <div>
                         <h3 className="text-sm font-semibold text-gray-900">
@@ -861,62 +832,63 @@ export default function MatchHighlightsPage() {
                       </Button>
                     </div>
                   </div>
+                </div>
+
+                <div className="p-4 border-b border-gray-200">
+                  <div className="flex gap-2">
+                    <Button
+                      onClick={() => void markHighlight()}
+                      disabled={isMarking}
+                      className="flex-1 bg-[#0047AB] hover:bg-[#003580] text-white disabled:opacity-60"
+                    >
+                      {isMarking
+                        ? "Marking..."
+                        : `Mark Highlight (-${MARK_OFFSET_SECONDS}s)`}
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      onClick={() => void handleUndo()}
+                      disabled={!canUndo || isMarking}
+                      className="border-gray-300 text-gray-600 disabled:opacity-40"
+                      title="Undo last highlight (Ctrl+Z)"
+                    >
+                      Undo
+                    </Button>
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {ACTIONS.map((action) => {
+                      const active = action === selectedAction;
+                      return (
+                        <button
+                          key={action}
+                          type="button"
+                          onClick={() => setSelectedAction(action)}
+                          className={`px-3 py-2 rounded-md border text-sm font-medium transition-colors ${
+                            active
+                              ? "bg-[#0047AB] text-white border-[#0047AB]"
+                              : "bg-white text-gray-800 border-gray-300 hover:bg-gray-50"
+                          }`}
+                        >
+                          {action.toUpperCase()}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-3">
+                    <Input
+                      value={noteDraft}
+                      onChange={(e) => setNoteDraft(e.target.value)}
+                      placeholder="Add note for next marked point (optional)"
+                      className="h-9"
+                    />
+                  </div>
 
                   <p className="mt-3 text-xs text-gray-500">
                     Pick an action, then hit “Mark Highlight”. We save 5s
                     earlier. You can also press number keys to capture directly.
                   </p>
-
-                  {sortedPoints.length > 0 && (
-                    <div className="mt-3 flex items-center justify-between gap-3 flex-wrap">
-                      <div className="flex gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-7 px-2 text-xs border-gray-300"
-                          onClick={() =>
-                            setSelectedPointIds(
-                              new Set(sortedPoints.map((p) => p.id))
-                            )
-                          }
-                          disabled={
-                            selectedPointIds.size === sortedPoints.length
-                          }
-                        >
-                          <CheckSquare className="w-3.5 h-3.5 mr-1" />
-                          Select All
-                        </Button>
-
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-7 px-2 text-xs border-gray-300"
-                          onClick={() => setSelectedPointIds(new Set())}
-                          disabled={selectedPointIds.size === 0}
-                        >
-                          <Square className="w-3.5 h-3.5 mr-1" />
-                          Deselect All
-                        </Button>
-                      </div>
-
-                      <span className="text-xs text-gray-500">
-                        ~
-                        {(() => {
-                          const totalSec = sortedPoints
-                            .filter((p) => selectedPointIds.has(p.id))
-                            .reduce(
-                              (sum, p) =>
-                                sum +
-                                (p.clipBefore ?? MARK_OFFSET_SECONDS) +
-                                (p.clipAfter ?? MARK_OFFSET_SECONDS),
-                              0
-                            );
-                          return formatTime(totalSec);
-                        })()}{" "}
-                        est. duration
-                      </span>
-                    </div>
-                  )}
 
                   <div className="mt-3">
                     <ActionLegend
@@ -934,8 +906,8 @@ export default function MatchHighlightsPage() {
                 {hasUnsavedOffsets && (
                   <div className="px-4 py-3 border-b border-amber-200 bg-amber-50 flex items-center justify-between gap-3">
                     <span className="text-xs font-medium text-amber-800">
-                      {dirtyOffsetIds.size} unsaved offset change
-                      {dirtyOffsetIds.size > 1 ? "s" : ""}
+                      {dirtyPointIds.size} unsaved point change
+                      {dirtyPointIds.size > 1 ? "s" : ""}
                     </span>
                     <Button
                       onClick={() => void applyOffsets()}
@@ -944,6 +916,62 @@ export default function MatchHighlightsPage() {
                     >
                       {isSavingOffsets ? "Saving…" : "Apply Changes"}
                     </Button>
+                  </div>
+                )}
+
+                <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+                  <span className="text-sm font-medium text-gray-900">
+                    Highlights
+                  </span>
+                  <span className="text-xs text-gray-500">
+                    {selectedPointIds.size}/{sortedPoints.length} selected
+                  </span>
+                </div>
+
+                {sortedPoints.length > 0 && (
+                  <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between gap-3 flex-wrap">
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 px-2 text-xs border-gray-300"
+                        onClick={() =>
+                          setSelectedPointIds(new Set(sortedPoints.map((p) => p.id)))
+                        }
+                        disabled={selectedPointIds.size === sortedPoints.length}
+                      >
+                        <CheckSquare className="w-3.5 h-3.5 mr-1" />
+                        Select All
+                      </Button>
+
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 px-2 text-xs border-gray-300"
+                        onClick={() => setSelectedPointIds(new Set())}
+                        disabled={selectedPointIds.size === 0}
+                      >
+                        <Square className="w-3.5 h-3.5 mr-1" />
+                        Deselect All
+                      </Button>
+                    </div>
+
+                    <span className="text-xs text-gray-500">
+                      ~
+                      {(() => {
+                        const totalSec = sortedPoints
+                          .filter((p) => selectedPointIds.has(p.id))
+                          .reduce(
+                            (sum, p) =>
+                              sum +
+                              (p.clipBefore ?? MARK_OFFSET_SECONDS) +
+                              (p.clipAfter ?? MARK_OFFSET_SECONDS),
+                            0
+                          );
+                        return formatTime(totalSec);
+                      })()}{" "}
+                      est. duration
+                    </span>
                   </div>
                 )}
 
@@ -1109,6 +1137,20 @@ export default function MatchHighlightsPage() {
                               </Button>
                             </div>
 
+                            <div className="mt-3">
+                              <Input
+                                value={p.note ?? ""}
+                                onChange={(e) =>
+                                  updatePointOffset(p.id, {
+                                    note: e.target.value,
+                                  })
+                                }
+                                placeholder="Add note (optional)"
+                                className="h-8 text-xs"
+                              />
+                            </div>
+
+                            {/* Clip progress bar */}
                             <div className="mt-2 w-full">
                               <div className="h-1.5 w-full bg-gray-200 rounded-full overflow-hidden">
                                 <div
