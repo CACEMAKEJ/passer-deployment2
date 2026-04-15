@@ -1,17 +1,53 @@
 import os
 import cv2
+import sys
 import json
 import torch
+import tempfile
+import requests
 from ultralytics import YOLO
 from collections import defaultdict, deque
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # ============================================================
-# PATHS (EDIT THESE)
+# PATHS
 # ============================================================
-VIDEO_INPUT_PATH = r"c:\Users\nicol\Collab project\work_env\testVideo.mp4" #Video input
-OUTPUT_DIR = os.path.abspath("runs/video_output_pose")
+VIDEO_INPUT_PATH = sys.argv[1] if len(sys.argv) > 1 else None
+
+if not VIDEO_INPUT_PATH:
+    raise ValueError("No video path or URL was provided to the Python script.")
+
+print("Received video input:", VIDEO_INPUT_PATH)
+
+def ensure_local_video(path_or_url: str) -> str:
+    if path_or_url.startswith("http://") or path_or_url.startswith("https://"):
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
+        temp_file.close()
+
+        print("Downloading remote video...")
+        response = requests.get(path_or_url, stream=True, timeout=120)
+        response.raise_for_status()
+
+        with open(temp_file.name, "wb") as f:
+            for chunk in response.iter_content(chunk_size=1024 * 1024):
+                if chunk:
+                    f.write(chunk)
+
+        print("Downloaded to:", temp_file.name)
+        return temp_file.name
+
+    return path_or_url
+
+VIDEO_INPUT_PATH = ensure_local_video(VIDEO_INPUT_PATH)
+print("Using local video file:", VIDEO_INPUT_PATH)
+
+# ============================================================
+# OUTPUT PATHS (FIXED TO Ai-Dev FOLDER)
+# ============================================================
+OUTPUT_DIR = os.path.join(BASE_DIR, "runs", "video_output_pose")
 OUTPUT_VIDEO = os.path.join(OUTPUT_DIR, "smash_detection_output.mp4")
-OUTPUT_JSON = os.path.abspath("output_smash_detection.json")
+OUTPUT_JSON = os.path.join(BASE_DIR, "runs","output_smash_detection.json")
 
 # ============================================================
 # POSE MODEL (use stronger if possible)

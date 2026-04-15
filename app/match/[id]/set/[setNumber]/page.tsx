@@ -35,7 +35,7 @@ type HighlightAction =
 
 type HighlightPoint = {
   id: string;
-  timestamp: number; // seconds
+  timestamp: number;
   action: HighlightAction;
   note?: string | null;
   clipBefore?: number; // seconds to include before the timestamp
@@ -71,16 +71,6 @@ const ACTIONS: HighlightAction[] = [
 
 const MARK_OFFSET_SECONDS = 5;
 
-const ACTION_TIMELINE_COLORS: Record<HighlightAction, string> = {
-  spike: "#EF4444",
-  set: "#06B6D4",
-  block: "#3B82F6",
-  pass: "#22C55E",
-  ace: "#F59E0B",
-  save: "#8B5CF6",
-  other: "#9CA3AF",
-};
-
 function formatTime(s: number) {
   const m = Math.floor(s / 60);
   const sec = Math.floor(s % 60);
@@ -98,6 +88,7 @@ export default function MatchHighlightsPage() {
   const setNumber = parseInt(params.setNumber as string, 10) || 1;
 
   const playerRef = useRef<VideoPlayerHandle | null>(null);
+  const aiPlayerRef = useRef<VideoPlayerHandle | null>(null);
 
   const [isLoading, setIsLoading] = useState(true);
   const [pageError, setPageError] = useState<string | null>(null);
@@ -110,6 +101,9 @@ export default function MatchHighlightsPage() {
     date: string;
     videoUrl: string | null;
   } | null>(null);
+
+  const [smashVideoUrl, setSmashVideoUrl] = useState<string | null>(null);
+  const [isGeneratingSmashes, setIsGeneratingSmashes] = useState(false);
   const [isEditingMatchTitle, setIsEditingMatchTitle] = useState(false);
   const [matchNameDraft, setMatchNameDraft] = useState("");
   const [isSavingMatchTitle, setIsSavingMatchTitle] = useState(false);
@@ -119,41 +113,36 @@ export default function MatchHighlightsPage() {
   } | null>(null);
   const skipMatchBlurSaveRef = useRef(false);
 
-  // Points for real matches (from Supabase)
   const [points, setPoints] = useState<HighlightPoint[]>([]);
   const [selectedPointId, setSelectedPointId] = useState<string | null>(null);
-
   const [selectedAction, setSelectedAction] =
     useState<HighlightAction>("spike");
   const [noteDraft, setNoteDraft] = useState("");
 
-  // Checkbox selection for reel generation
   const [selectedPointIds, setSelectedPointIds] = useState<Set<string>>(
-    new Set(),
+    new Set()
   );
   const [isMarking, setIsMarking] = useState(false);
 
+  const [dirtyOffsetIds, setDirtyOffsetIds] = useState<Set<string>>(new Set());
   // Track which point IDs have unsaved offset edits
   const [dirtyPointIds, setDirtyPointIds] = useState<Set<string>>(new Set());
   const [isSavingOffsets, setIsSavingOffsets] = useState(false);
   const hasUnsavedOffsets = dirtyPointIds.size > 0;
 
-  // Clip-bounded playback: which point is actively playing + current video time
   const [activeClipId, setActiveClipId] = useState<string | null>(null);
   const [currentVideoTime, setCurrentVideoTime] = useState(0);
   const [videoDuration, setVideoDuration] = useState(0);
-  // We need a ref for the active clip so the timeupdate callback can read it without stale closures
+
   const activeClipRef = useRef<{
     id: string;
     start: number;
     end: number;
   } | null>(null);
 
-  // Track the most recently inserted point for undo
   const lastInsertedIdRef = useRef<string | null>(null);
   const [canUndo, setCanUndo] = useState(false);
 
-  // Toasts (bottom-right)
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
   const toast = {
@@ -161,13 +150,9 @@ export default function MatchHighlightsPage() {
       const id = crypto.randomUUID();
       setToasts((prev) => [...prev, { id, kind, message }]);
 
-      // auto-dismiss
-      window.setTimeout(
-        () => {
-          setToasts((prev) => prev.filter((t) => t.id !== id));
-        },
-        kind === "error" ? 4500 : 2500,
-      );
+      window.setTimeout(() => {
+        setToasts((prev) => prev.filter((t) => t.id !== id));
+      }, kind === "error" ? 4500 : 2500);
     },
     dismiss: (id: string) => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -178,7 +163,7 @@ export default function MatchHighlightsPage() {
     if (!matchRenameFeedback) return;
     const timeoutId = window.setTimeout(
       () => setMatchRenameFeedback(null),
-      3000,
+      3000
     );
     return () => window.clearTimeout(timeoutId);
   }, [matchRenameFeedback]);
@@ -226,7 +211,7 @@ export default function MatchHighlightsPage() {
       if (error) throw error;
 
       setMatch((prev) =>
-        prev ? { ...prev, match_name: nextMatchName } : prev,
+        prev ? { ...prev, match_name: nextMatchName } : prev
       );
       setMatchRenameFeedback({
         kind: "success",
@@ -246,7 +231,6 @@ export default function MatchHighlightsPage() {
     }
   };
 
-  // Hotkey handling: map number keys to actions (1..N) and 'm' to mark with current action
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const active = document.activeElement;
@@ -255,11 +239,11 @@ export default function MatchHighlightsPage() {
         (active.tagName === "INPUT" ||
           active.tagName === "TEXTAREA" ||
           (active as HTMLElement).isContentEditable)
-      )
+      ) {
         return;
+      }
 
       const k = e.key;
-      // number keys: 1..ACTIONS.length -> direct mark using that action
       if (/^[1-9]$/.test(k)) {
         const idx = Number(k) - 1;
         if (idx >= 0 && idx < ACTIONS.length) {
@@ -276,7 +260,6 @@ export default function MatchHighlightsPage() {
         return;
       }
 
-      // Ctrl/Cmd+Z → undo last point
       if (k === "z" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         void handleUndo();
@@ -289,7 +272,7 @@ export default function MatchHighlightsPage() {
 
   const sortedPoints = useMemo(
     () => [...points].sort((a, b) => a.timestamp - b.timestamp),
-    [points],
+    [points]
   );
 
   const timelineMarkers = useMemo(() => {
@@ -329,7 +312,7 @@ export default function MatchHighlightsPage() {
         const { data: matchRow, error: matchErr } = await supabase
           .from("matches")
           .select(
-            "id, match_name, match_date, opponent, team_name, video_path, video_url",
+            "id, match_name, match_date, opponent, team_name, video_path, video_url"
           )
           .eq("id", matchId)
           .single();
@@ -373,6 +356,7 @@ export default function MatchHighlightsPage() {
           clipBefore: p.clip_before ?? MARK_OFFSET_SECONDS,
           clipAfter: p.clip_after ?? MARK_OFFSET_SECONDS,
         }));
+
         setPoints(loaded);
         setSelectedPointIds(new Set(loaded.map((p) => p.id)));
         setDirtyPointIds(new Set());
@@ -395,7 +379,6 @@ export default function MatchHighlightsPage() {
     const t = Math.max(0, now - MARK_OFFSET_SECONDS);
     const trimmedNote = noteDraft.trim();
 
-    // Seek back so the user can see the captured moment
     playerRef.current?.seekTo(t);
 
     try {
@@ -443,7 +426,7 @@ export default function MatchHighlightsPage() {
 
       toast.push(
         "success",
-        `Saved ${(newPoint.action as string).toUpperCase()} @ ${formatTime(t)}`,
+        `Saved ${(newPoint.action as string).toUpperCase()} @ ${formatTime(t)}`
       );
     } catch (e) {
       console.error(e);
@@ -453,21 +436,20 @@ export default function MatchHighlightsPage() {
     }
   };
 
-  // Update clip offsets for a point locally (mark dirty; no DB write yet)
   const updatePointOffset = (
     id: string,
     updates: { clipBefore?: number; clipAfter?: number; note?: string | null },
   ) => {
     setPoints((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, ...updates } : p)),
+      prev.map((p) => (p.id === id ? { ...p, ...updates } : p))
     );
     setDirtyPointIds((prev) => new Set(prev).add(id));
   };
 
-  // Bulk-save all dirty offsets to DB
   const applyOffsets = async () => {
     if (dirtyPointIds.size === 0) return;
     setIsSavingOffsets(true);
+
     try {
       const dirty = points.filter((p) => dirtyPointIds.has(p.id));
       // Supabase JS doesn't support batch-updating different rows in one call,
@@ -481,9 +463,10 @@ export default function MatchHighlightsPage() {
               clip_after: p.clipAfter ?? MARK_OFFSET_SECONDS,
               note: p.note?.trim() ? p.note.trim() : null,
             })
-            .eq("id", p.id),
-        ),
+            .eq("id", p.id)
+        )
       );
+
       const failed = results.filter((r) => r.error);
       if (failed.length > 0) {
         toast.push("error", `Failed to save ${failed.length} offset(s)`);
@@ -499,7 +482,6 @@ export default function MatchHighlightsPage() {
     }
   };
 
-  // Handle time updates from the video player — auto-pause when the active clip's end is reached
   const handleVideoTimeUpdate = useCallback((time: number) => {
     setCurrentVideoTime(time);
     const clip = activeClipRef.current;
@@ -519,7 +501,7 @@ export default function MatchHighlightsPage() {
       videoDuration > 0
         ? Math.min(videoDuration, p.timestamp + after)
         : p.timestamp + after;
-    // Set the active clip boundary
+
     activeClipRef.current = { id: p.id, start, end };
     setActiveClipId(p.id);
     setCurrentVideoTime(start);
@@ -535,17 +517,14 @@ export default function MatchHighlightsPage() {
 
   const handleMarkerAdjust = (
     markerId: string,
-    updates: { clipBefore?: number; clipAfter?: number },
+    updates: { clipBefore?: number; clipAfter?: number }
   ) => {
     updatePointOffset(markerId, updates);
   };
 
   const handleDelete = async (id: string) => {
     try {
-      const { error } = await supabase
-        .from("match_points")
-        .delete()
-        .eq("id", id);
+      const { error } = await supabase.from("match_points").delete().eq("id", id);
       if (error) throw error;
 
       setPoints((prev) => prev.filter((p) => p.id !== id));
@@ -559,6 +538,7 @@ export default function MatchHighlightsPage() {
         next.delete(id);
         return next;
       });
+
       if (selectedPointId === id) setSelectedPointId(null);
       if (activeClipId === id) {
         activeClipRef.current = null;
@@ -617,10 +597,7 @@ export default function MatchHighlightsPage() {
               There was a problem loading this match.
             </p>
             <div className="flex gap-3 justify-center">
-              <Button
-                variant="outline"
-                onClick={() => window.location.reload()}
-              >
+              <Button variant="outline" onClick={() => window.location.reload()}>
                 Try Again
               </Button>
               <Button onClick={() => router.push("/dashboard")}>
@@ -700,14 +677,17 @@ export default function MatchHighlightsPage() {
                     </span>
                   </button>
                 )}
+
                 {!isEditingMatchTitle && (
                   <p className="text-xs text-gray-400 mt-1">
                     Click title to rename
                   </p>
                 )}
+
                 {isSavingMatchTitle && (
                   <p className="text-xs text-[#0047AB] mt-1">Saving title...</p>
                 )}
+
                 {matchRenameFeedback && (
                   <p
                     className={`text-xs mt-1 ${
@@ -719,6 +699,7 @@ export default function MatchHighlightsPage() {
                     {matchRenameFeedback.message}
                   </p>
                 )}
+
                 <p className="text-sm text-gray-600">
                   {new Date(match.date).toLocaleDateString()}
                 </p>
@@ -747,28 +728,112 @@ export default function MatchHighlightsPage() {
                 markDisabled={isMarking}
                 isMarking={isMarking}
               />
+
               <div className="mt-4">
                 <HighlightReelPanel
                   matchId={matchId}
                   selectedPointIds={selectedPointIds}
                 />
               </div>
+
+              {smashVideoUrl && (
+                <div className="space-y-4">
+                  <VideoPlayer
+                    ref={aiPlayerRef}
+                    title="(Beta Ai) Smash detection"
+                    src={smashVideoUrl}
+                    onTimeUpdate={handleVideoTimeUpdate}
+                    currentTime={currentVideoTime}
+                    onDurationChange={setVideoDuration}
+                    activeMarkerId={activeClipId ?? selectedPointId}
+                    onMarkerClick={handleMarkerClick}
+                    onMarkerAdjust={handleMarkerAdjust}
+                    onMarkPoint={() => {
+                      void markHighlight();
+                    }}
+                    markDisabled={isMarking}
+                    isMarking={isMarking}
+                  />
+                </div>
+              )}
             </div>
 
             {/* Highlights panel (1/3) */}
             <div className="md:col-span-4">
               <div className="bg-white border border-gray-200 rounded-lg overflow-hidden flex flex-col">
-                {/* Header */}
-                <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
-                  <span className="text-sm font-medium text-gray-900">
-                    Highlights
-                  </span>
-                  <span className="text-xs text-gray-500">
-                    {selectedPointIds.size}/{sortedPoints.length} selected
-                  </span>
+                <div className="px-4 py-4 border-b border-gray-200">
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                    <div className="flex items-start justify-between gap-3 flex-wrap">
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-900">
+                          (Beta) AI Smash detection
+                        </h3>
+                        <p className="mt-1 text-xs text-gray-500">
+                          Automatically detect smash moments in the match video.
+                        </p>
+                      </div>
+
+                      <Button
+                        type="button"
+                        className="bg-[#0047AB] hover:bg-[#003580] text-white"
+                        disabled={isGeneratingSmashes || !match.videoUrl}
+                        onClick={async () => {
+                          try {
+                            setIsGeneratingSmashes(true);
+
+                            const res = await fetch("/api/ai/ai-function", {
+                              method: "POST",
+                              headers: {
+                                "Content-Type": "application/json",
+                              },
+                              body: JSON.stringify({
+                                videoUrl: match.videoUrl,
+                                matchId,
+                              }),
+                            });
+
+                            const raw = await res.text();
+                            console.log("Raw response:", raw);
+
+                            let data;
+                            try {
+                              data = JSON.parse(raw);
+                            } catch {
+                              throw new Error(`Expected JSON but got: ${raw}`);
+                            }
+
+                            if (data.success) {
+                              console.log("AI result:", data.output);
+                              setSmashVideoUrl(
+                                `/api/ai/output-video?ts=${Date.now()}`
+                              );
+                              toast.push(
+                                "success",
+                                "Smash detection video generated"
+                              );
+                            } else {
+                              console.error("Error:", data.error);
+                              toast.push(
+                                "error",
+                                data.error ?? "Failed to generate smashes"
+                              );
+                            }
+                          } catch (err) {
+                            console.error("Request failed", err);
+                            toast.push("error", "Request failed");
+                          } finally {
+                            setIsGeneratingSmashes(false);
+                          }
+                        }}
+                      >
+                        {isGeneratingSmashes
+                          ? "Generating..."
+                          : "Generate smashes"}
+                      </Button>
+                    </div>
+                  </div>
                 </div>
 
-                {/* Controls (non-scrolling) */}
                 <div className="p-4 border-b border-gray-200">
                   <div className="flex gap-2">
                     <Button
@@ -780,6 +845,7 @@ export default function MatchHighlightsPage() {
                         ? "Marking..."
                         : `Mark Highlight (-${MARK_OFFSET_SECONDS}s)`}
                     </Button>
+
                     <Button
                       variant="outline"
                       onClick={() => void handleUndo()}
@@ -810,7 +876,6 @@ export default function MatchHighlightsPage() {
                       );
                     })}
                   </div>
-
                   <div className="mt-3">
                     <Input
                       value={noteDraft}
@@ -824,55 +889,7 @@ export default function MatchHighlightsPage() {
                     Pick an action, then hit “Mark Highlight”. We save 5s
                     earlier. You can also press number keys to capture directly.
                   </p>
-                  {/* Selection controls */}
-                  {sortedPoints.length > 0 && (
-                    <div className="mt-3 flex items-center justify-between gap-3 flex-wrap">
-                      <div className="flex gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-7 px-2 text-xs border-gray-300"
-                          onClick={() =>
-                            setSelectedPointIds(
-                              new Set(sortedPoints.map((p) => p.id)),
-                            )
-                          }
-                          disabled={
-                            selectedPointIds.size === sortedPoints.length
-                          }
-                        >
-                          <CheckSquare className="w-3.5 h-3.5 mr-1" />
-                          Select All
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-7 px-2 text-xs border-gray-300"
-                          onClick={() => setSelectedPointIds(new Set())}
-                          disabled={selectedPointIds.size === 0}
-                        >
-                          <Square className="w-3.5 h-3.5 mr-1" />
-                          Deselect All
-                        </Button>
-                      </div>
-                      <span className="text-xs text-gray-500">
-                        ~
-                        {(() => {
-                          const totalSec = sortedPoints
-                            .filter((p) => selectedPointIds.has(p.id))
-                            .reduce(
-                              (sum, p) =>
-                                sum +
-                                (p.clipBefore ?? MARK_OFFSET_SECONDS) +
-                                (p.clipAfter ?? MARK_OFFSET_SECONDS),
-                              0,
-                            );
-                          return formatTime(totalSec);
-                        })()}{" "}
-                        est. duration
-                      </span>
-                    </div>
-                  )}
+
                   <div className="mt-3">
                     <ActionLegend
                       items={ACTIONS.map((a, i) => ({
@@ -886,7 +903,6 @@ export default function MatchHighlightsPage() {
                   </div>
                 </div>
 
-                {/* Apply offsets banner */}
                 {hasUnsavedOffsets && (
                   <div className="px-4 py-3 border-b border-amber-200 bg-amber-50 flex items-center justify-between gap-3">
                     <span className="text-xs font-medium text-amber-800">
@@ -903,7 +919,62 @@ export default function MatchHighlightsPage() {
                   </div>
                 )}
 
-                {/* Scrollable list */}
+                <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+                  <span className="text-sm font-medium text-gray-900">
+                    Highlights
+                  </span>
+                  <span className="text-xs text-gray-500">
+                    {selectedPointIds.size}/{sortedPoints.length} selected
+                  </span>
+                </div>
+
+                {sortedPoints.length > 0 && (
+                  <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between gap-3 flex-wrap">
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 px-2 text-xs border-gray-300"
+                        onClick={() =>
+                          setSelectedPointIds(new Set(sortedPoints.map((p) => p.id)))
+                        }
+                        disabled={selectedPointIds.size === sortedPoints.length}
+                      >
+                        <CheckSquare className="w-3.5 h-3.5 mr-1" />
+                        Select All
+                      </Button>
+
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 px-2 text-xs border-gray-300"
+                        onClick={() => setSelectedPointIds(new Set())}
+                        disabled={selectedPointIds.size === 0}
+                      >
+                        <Square className="w-3.5 h-3.5 mr-1" />
+                        Deselect All
+                      </Button>
+                    </div>
+
+                    <span className="text-xs text-gray-500">
+                      ~
+                      {(() => {
+                        const totalSec = sortedPoints
+                          .filter((p) => selectedPointIds.has(p.id))
+                          .reduce(
+                            (sum, p) =>
+                              sum +
+                              (p.clipBefore ?? MARK_OFFSET_SECONDS) +
+                              (p.clipAfter ?? MARK_OFFSET_SECONDS),
+                            0
+                          );
+                        return formatTime(totalSec);
+                      })()}{" "}
+                      est. duration
+                    </span>
+                  </div>
+                )}
+
                 <div className="overflow-y-auto max-h-[24rem] md:max-h-[36rem] lg:max-h-[44rem]">
                   {sortedPoints.length === 0 ? (
                     <div className="p-4 text-sm text-gray-600">
@@ -915,31 +986,31 @@ export default function MatchHighlightsPage() {
                         const selected = p.id === selectedPointId;
                         const isPlaying = p.id === activeClipId;
 
-                        // Compute progress for this clip
                         const before = p.clipBefore ?? MARK_OFFSET_SECONDS;
                         const after = p.clipAfter ?? MARK_OFFSET_SECONDS;
                         const clipStart = Math.max(0, p.timestamp - before);
                         const clipEnd = p.timestamp + after;
                         const clipDuration = clipEnd - clipStart;
+
                         let progress = 0;
                         if (isPlaying && clipDuration > 0) {
                           progress = Math.min(
                             1,
                             Math.max(
                               0,
-                              (currentVideoTime - clipStart) / clipDuration,
-                            ),
+                              (currentVideoTime - clipStart) / clipDuration
+                            )
                           );
                         }
 
                         return (
                           <li
                             key={p.id}
-                            className={`px-4 py-3 ${selected ? "bg-blue-50" : "hover:bg-gray-50"}`}
+                            className={`px-4 py-3 ${
+                              selected ? "bg-blue-50" : "hover:bg-gray-50"
+                            }`}
                           >
                             <div className="flex items-start justify-between gap-3">
-                              {" "}
-                              {/* Checkbox */}
                               <button
                                 type="button"
                                 className="mt-0.5 flex-shrink-0"
@@ -962,7 +1033,8 @@ export default function MatchHighlightsPage() {
                                 ) : (
                                   <Square className="w-5 h-5 text-gray-400" />
                                 )}
-                              </button>{" "}
+                              </button>
+
                               <button
                                 type="button"
                                 className="flex-1 text-left"
@@ -980,6 +1052,7 @@ export default function MatchHighlightsPage() {
                                   Click to seek
                                 </p>
                               </button>
+
                               <div className="ml-3 flex flex-col items-end gap-2">
                                 <div className="flex items-center gap-2 text-xs text-gray-600">
                                   <div className="flex items-center gap-1">
@@ -990,7 +1063,7 @@ export default function MatchHighlightsPage() {
                                           clipBefore: Math.max(
                                             0,
                                             (p.clipBefore ??
-                                              MARK_OFFSET_SECONDS) - 1,
+                                              MARK_OFFSET_SECONDS) - 1
                                           ),
                                         })
                                       }
@@ -1025,7 +1098,7 @@ export default function MatchHighlightsPage() {
                                           clipAfter: Math.max(
                                             0,
                                             (p.clipAfter ??
-                                              MARK_OFFSET_SECONDS) - 1,
+                                              MARK_OFFSET_SECONDS) - 1
                                           ),
                                         })
                                       }
@@ -1053,6 +1126,7 @@ export default function MatchHighlightsPage() {
                                   </div>
                                 </div>
                               </div>
+
                               <Button
                                 variant="outline"
                                 className="border-gray-300"
@@ -1084,14 +1158,21 @@ export default function MatchHighlightsPage() {
                                     isPlaying
                                       ? "bg-[#0047AB]"
                                       : selected
-                                        ? "bg-blue-300"
-                                        : "bg-gray-300"
+                                      ? "bg-blue-300"
+                                      : "bg-gray-300"
                                   }`}
                                   style={{
-                                    width: `${isPlaying ? progress * 100 : selected ? 100 : 0}%`,
+                                    width: `${
+                                      isPlaying
+                                        ? progress * 100
+                                        : selected
+                                        ? 100
+                                        : 0
+                                    }%`,
                                   }}
                                 />
                               </div>
+
                               {(isPlaying || selected) && (
                                 <div className="flex justify-between mt-1 text-[10px] text-gray-400">
                                   <span>{formatTime(clipStart)}</span>
