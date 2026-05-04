@@ -8,8 +8,10 @@ RUN apt-get update && \
         libglib2.0-0 libsm6 libxext6 libxrender1 ffmpeg && \
     rm -rf /var/lib/apt/lists/*
 
-# Install CPU-only PyTorch first so ultralytics doesn't pull the GPU wheel
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+# Install CPU-only PyTorch + torchvision from the official CPU wheel index
+# Install both explicitly before installing the rest of requirements so
+# pip doesn't resolve a mismatched `torchvision` wheel from PyPI.
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
